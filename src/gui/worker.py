@@ -368,6 +368,9 @@ class WorkerThread(QThread):
             progress_thread.is_running = True
             progress_thread.start()
             
+            # 保存对线程的引用，以便在stop方法中可以访问
+            self.progress_thread = progress_thread
+            
             try:
                 # 使用导入的process_files_concurrently函数
                 print(f"启动并发处理，并发数: {concurrency}", flush=True)
@@ -391,10 +394,17 @@ class WorkerThread(QThread):
                 print(f"并发处理过程中出错: {e}", flush=True)
                 import traceback
                 print(traceback.format_exc(), flush=True)
+            finally:
+                # 确保在任何情况下都停止进度监控线程
+                if progress_thread and hasattr(progress_thread, 'is_running'):
+                    progress_thread.is_running = False
+                    try:
+                        progress_thread.join(timeout=1.0)
+                    except:
+                        pass
                 
-            # 停止进度监控线程
-            progress_thread.is_running = False
-            progress_thread.join(timeout=1.0)
+                # 清除线程引用
+                self.progress_thread = None
             
             # 计算处理时间
             end_time = time.time()
@@ -502,4 +512,30 @@ class WorkerThread(QThread):
     
     def stop(self):
         """停止线程"""
-        self.is_running = False 
+        self.is_running = False
+        
+        # 停止当前可能运行的进度监控线程
+        if hasattr(self, 'progress_thread') and hasattr(self.progress_thread, 'is_running'):
+            self.progress_thread.is_running = False
+            try:
+                self.progress_thread.join(timeout=1.0)
+            except:
+                pass
+        
+        # 对于脱水处理，尝试设置停止事件以通知线程池
+        if self.operation_type == 'condense':
+            try:
+                from core.novel_condenser.main import process_files_concurrently
+                if hasattr(process_files_concurrently, 'progress_stopped'):
+                    process_files_concurrently.progress_stopped.set()
+            except ImportError:
+                try:
+                    from src.core.novel_condenser.main import process_files_concurrently
+                    if hasattr(process_files_concurrently, 'progress_stopped'):
+                        process_files_concurrently.progress_stopped.set()
+                except:
+                    pass
+        
+        # 对于已提交到线程池的任务，我们无法直接停止它们
+        # 但是设置了标志位后，它们在下一个检查点应该会自行退出
+        print("已发送停止信号到工作线程", flush=True) 

@@ -27,6 +27,7 @@
     {
       "key": "你的API密钥",
       "model": "gemini-2.0-flash",
+      "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
       "rpm": 5
     }
   ],
@@ -44,6 +45,7 @@
     {
       "key": "你的第一个API密钥",
       "model": "gemini-2.0-flash",
+      "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
       "rpm": 5
     },
     {
@@ -61,6 +63,21 @@
 }
 ```
 
+### 最简配置示例
+
+只提供API密钥，使用默认设置：
+
+```json
+{
+  "gemini_api": [
+    {
+      "key": "你的API密钥"
+    }
+  ],
+  "max_rpm": 20
+}
+```
+
 ### 配置项说明
 
 - `key`: 你的Gemini API密钥
@@ -68,6 +85,7 @@
   - `gemini-2.0-flash` - 速度最快
   - `gemini-1.5-flash` - 平衡速度和质量
   - `gemini-2.0-pro` - 质量最好但速度较慢
+- `redirect_url`: API代理地址，可选，默认为：`https://generativelanguage.googleapis.com/v1beta/models`
 - `rpm`: 每分钟请求次数限制（Rate Per Minute）
 - `max_rpm`: 所有API密钥的总体最大RPM限制
 
@@ -88,6 +106,7 @@
     {
       "key": "你的OpenAI API密钥",
       "model": "gpt-3.5-turbo",
+      "redirect_url": "https://api.openai.com/v1/chat/completions",
       "rpm": 3
     }
   ],
@@ -103,6 +122,7 @@
     {
       "key": "你的Gemini API密钥",
       "model": "gemini-2.0-flash",
+      "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
       "rpm": 5
     }
   ],
@@ -110,6 +130,7 @@
     {
       "key": "你的OpenAI API密钥",
       "model": "gpt-3.5-turbo",
+      "redirect_url": "https://api.openai.com/v1/chat/completions",
       "rpm": 3
     },
     {
@@ -129,6 +150,7 @@
 - `model`: 使用的模型名称，主要选项：
   - `gpt-3.5-turbo` - 速度快，成本低
   - `gpt-4` - 质量高，成本高
+- `redirect_url`: API代理地址，可选，默认为：`https://api.openai.com/v1/chat/completions`
 - `rpm`: 每分钟请求次数限制（根据你的账户额度设置）
 - `preferred_api`：首选API服务，可设置为`"gemini"`或`"openai"`
 
@@ -163,15 +185,13 @@
       "key": "你的API密钥",
       "model": "适用的模型名称",
       "rpm": 3,
-      "base_url": "https://api.deepseek.com/v1",
-      "provider": "deepseek"
+      "redirect_url": "https://api.deepseek.com/v1/chat/completions"
     },
     {
       "key": "你的另一个API密钥",
       "model": "grok-1",
       "rpm": 2,
-      "base_url": "https://api.grok.ai/v1",
-      "provider": "grok"
+      "redirect_url": "https://api.grok.ai/v1/chat/completions"
     }
   ],
   "preferred_api": "openai"
@@ -180,19 +200,18 @@
 
 ### 配置项说明
 
-- `base_url`: 服务提供商的API基础URL，必须指向兼容OpenAI API格式的端点
-- `provider`: (可选) 服务提供商的标识，用于程序内部识别和日志记录
+- `redirect_url`: 服务提供商的API代理地址，必须指向兼容OpenAI API格式的端点
 - `model`: 根据服务提供商支持的模型名称填写
 
 ### 常见服务商的模型和端点
 
 | 服务商 | 模型示例 | 基础URL |
 |-------|--------|---------|
-| DeepSeek | deepseek-chat | https://api.deepseek.com/v1 |
-| Grok | grok-1 | https://api.grok.ai/v1 |
-| 智谱AI | glm-4 | https://api.chatglm.cn/v1 |
-| 通义千问 | qwen-turbo, qwen-plus | https://dashscope.aliyuncs.com/api/v1 |
-| Claude | claude-3-opus | https://api.anthropic.com/v1 |
+| DeepSeek | deepseek-chat | https://api.deepseek.com/v1/chat/completions |
+| Grok | grok-1 | https://api.grok.ai/v1/chat/completions |
+| 智谱AI | glm-4 | https://api.chatglm.cn/v1/chat/completions |
+| 通义千问 | qwen-turbo, qwen-plus | https://dashscope.aliyuncs.com/api/v1/chat/completions |
+| Claude | claude-3-opus | https://api.anthropic.com/v1/chat/completions |
 
 ## 本地模型配置
 
@@ -205,8 +224,7 @@
       "key": "无需真实密钥",
       "model": "你部署的模型名称",
       "rpm": 1,
-      "base_url": "http://localhost:1234/v1",
-      "provider": "local" 
+      "redirect_url": "http://localhost:1234/v1/chat/completions"
     }
   ],
   "preferred_api": "openai"
@@ -222,8 +240,7 @@
       "key": "ollama",
       "model": "llama3",
       "rpm": 1,
-      "base_url": "http://localhost:11434/v1",
-      "provider": "ollama" 
+      "redirect_url": "http://localhost:11434/v1/chat/completions"
     }
   ],
   "preferred_api": "openai"
@@ -249,6 +266,7 @@
     {
       "key": "你的Gemini API密钥-1",
       "model": "gemini-2.0-flash",
+      "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
       "rpm": 5
     },
     {
@@ -261,21 +279,20 @@
     {
       "key": "你的OpenAI API密钥",
       "model": "gpt-3.5-turbo",
+      "redirect_url": "https://api.openai.com/v1/chat/completions",
       "rpm": 3
     },
     {
       "key": "你的DeepSeek API密钥",
       "model": "deepseek-chat",
       "rpm": 10,
-      "base_url": "https://api.deepseek.com/v1",
-      "provider": "deepseek"
+      "redirect_url": "https://api.deepseek.com/v1/chat/completions"
     },
     {
       "key": "无需真实密钥",
       "model": "llama3",
       "rpm": 2,
-      "base_url": "http://localhost:1234/v1",
-      "provider": "local"
+      "redirect_url": "http://localhost:1234/v1/chat/completions"
     }
   ],
   "max_rpm": 30,

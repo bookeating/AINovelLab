@@ -5,8 +5,8 @@ AI小说实验室 - 版本信息
 """
 
 # 版本号格式：主版本号.次版本号.修订号
-VERSION = "0.0.2"
-VERSION_INFO = (0, 0, 2)  # 用于程序内部比较2
+VERSION = "0.0.3"
+VERSION_INFO = (0, 0, 3)  # 用于程序内部比较2
 # 构建信息
 BUILD_DATE = "2024-04-07"  # 更新构建日期
 BUILD_TYPE = "release"  # release, beta, alpha, dev

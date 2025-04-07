@@ -103,4 +103,26 @@ class MainWindow(QMainWindow):
         self.condense_path_changed.emit(base_dir, output_dir)
         
         # 自动切换到TXT转EPUB标签页（只有在用户点击了"合并成EPUB"按钮时才会触发）
-        self.tabs.setCurrentIndex(3)  # 索引3对应TXT转EPUB标签页 
+        self.tabs.setCurrentIndex(3)  # 索引3对应TXT转EPUB标签页
+        
+    def closeEvent(self, event):
+        """关闭窗口事件处理函数，确保所有后台线程都被停止"""
+        # 停止所有可能存在的工作线程
+        if hasattr(self.epub_splitter_tab, 'worker_thread') and self.epub_splitter_tab.worker_thread:
+            self.epub_splitter_tab.worker_thread.stop()
+            self.epub_splitter_tab.worker_thread.wait(1000)  # 等待最多1秒让线程结束
+            
+        if hasattr(self.condenser_tab, 'worker_thread') and self.condenser_tab.worker_thread:
+            self.condenser_tab.worker_thread.stop()
+            self.condenser_tab.worker_thread.wait(1000)  # 等待最多1秒让线程结束
+            
+        if hasattr(self.txt_to_epub_tab, 'worker_thread') and self.txt_to_epub_tab.worker_thread:
+            self.txt_to_epub_tab.worker_thread.stop()
+            self.txt_to_epub_tab.worker_thread.wait(1000)  # 等待最多1秒让线程结束
+            
+        # 处理可能没有正常退出的线程
+        # 注意：Python的线程无法直接强制终止，所以我们只能设置标志位并等待它们自己结束
+        print("正在关闭所有工作线程...")
+        
+        # 接受关闭事件
+        event.accept() 

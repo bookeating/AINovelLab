@@ -430,11 +430,18 @@ def process_files_concurrently(files_to_process: List[str], max_workers: int, ap
     
     # 进度更新器线程
     progress_stopped = threading.Event()
+    # 使这个事件对象可以被外部访问(用于停止处理)
+    process_files_concurrently.progress_stopped = progress_stopped
     
     # 定义文件处理函数
     def process_file(file_path, file_index):
         nonlocal success_count, completed_count, all_gemini_keys_skipped, all_openai_keys_skipped
         
+        # 检查是否应该停止
+        if progress_stopped.is_set():
+            logger.info(f"检测到停止信号，跳过文件: {os.path.basename(file_path)}")
+            return False
+            
         # 确保全局key_manager已初始化
         global gemini_key_manager, openai_key_manager
         
@@ -555,6 +562,11 @@ def process_files_concurrently(files_to_process: List[str], max_workers: int, ap
                 # 创建future到文件索引的映射
                 futures = {}
                 for i, file_path in enumerate(files_to_process):
+                    # 检查是否已经收到停止信号
+                    if progress_stopped.is_set():
+                        logger.warning("收到停止信号，取消提交剩余任务")
+                        break
+                        
                     future = executor.submit(process_file, file_path, i+1)
                     futures[future] = i
                 
@@ -566,6 +578,7 @@ def process_files_concurrently(files_to_process: List[str], max_workers: int, ap
                     
                     # 检查是否需要提前结束
                     if progress_stopped.is_set():
+                        logger.warning("收到停止信号，取消处理剩余任务")
                         # 尝试取消剩余任务（注意：已开始执行的任务无法取消）
                         for f in futures:
                             if not f.done():

@@ -201,67 +201,49 @@ def _process_content_with_gemini(content: str, api_key: str, redirect_url: str, 
     system_prompt = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
     
     # 构建正确的API URL格式
-    # 不同API服务商可能有不同的URL格式
+    # 优先使用配置的redirect_url，如果没有则使用默认URL
     final_api_url = ""
     
     # 针对官方Google API的正规URL格式
-    if redirect_url and "generativelanguage.googleapis.com" in redirect_url:
-        # 官方格式: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=YOUR_API_KEY
-        if ":generateContent" in redirect_url:
-            # 完整URL已提供
-            final_api_url = redirect_url
-        else:
-            # 只提供了基础URL，需要添加模型和方法
-            if redirect_url.endswith('/'):
-                final_api_url = f"{redirect_url}{model}:generateContent"
-            else:
-                final_api_url = f"{redirect_url}/{model}:generateContent"
+    if redirect_url:
+        # 使用配置的重定向URL
+        final_api_url = redirect_url
         
-        # 添加API密钥参数
-        if "key=" not in final_api_url:
-            if "?" in final_api_url:
-                final_api_url += f"&key={api_key}"
-            else:
-                final_api_url += f"?key={api_key}"
-    
-    # 针对第三方API服务商的URL格式
-    elif redirect_url and "aliyahzombie" in redirect_url:
-        # 第三方服务可能有特殊格式
-        if ":generateContent" in redirect_url:
-            final_api_url = redirect_url
-        else:
-            if redirect_url.endswith('/'):
-                final_api_url = f"{redirect_url}{model}:generateContent"
-            else:
-                final_api_url = f"{redirect_url}/{model}:generateContent"
-        
-        # 特殊认证处理 - 第三方API的具体认证方式
-        headers_custom = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key
-        }
-    else:
-        # 使用默认URL格式
-        if not redirect_url:
-            redirect_url = config.DEFAULT_GEMINI_API_URL
+        # 如果URL不包含:generateContent后缀，添加模型和方法
+        if ":generateContent" not in final_api_url:
+            # 确保URL末尾有斜杠
+            if not final_api_url.endswith('/'):
+                final_api_url += '/'
             
-        if ":generateContent" in redirect_url:
-            final_api_url = redirect_url
+            # 添加模型名和方法
+            final_api_url += f"{model}:generateContent"
+    else:
+        # 使用默认URL
+        final_api_url = f"{config.DEFAULT_GEMINI_API_URL}{model}:generateContent"
+    
+    # 构建请求头 
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    # 处理API密钥参数
+    if "key=" not in final_api_url:
+        # 如果URL中没有key参数，根据不同情况处理
+        if "aliyahzombie" in redirect_url:
+            # 使用自定义标头
+            headers["x-goog-api-key"] = api_key
+        elif redirect_url and "generativelanguage.googleapis.com" not in redirect_url:
+            # 对于非官方Google API，添加到请求头
+            headers["x-goog-api-key"] = api_key
         else:
-            if redirect_url.endswith('/'):
-                final_api_url = f"{redirect_url}{model}:generateContent"
-            else:
-                final_api_url = f"{redirect_url}/{model}:generateContent"
-        
-        # 添加API密钥
-        if "key=" not in final_api_url:
+            # 对于官方Google API，添加到URL
             if "?" in final_api_url:
                 final_api_url += f"&key={api_key}"
             else:
                 final_api_url += f"?key={api_key}"
     
     # 详细记录URL以便调试
-    logger.debug(f"API请求URL: {final_api_url}")
+    logger.debug(f"Gemini API请求URL: {final_api_url}")
     
     # 构建v1beta格式的请求体
     request_data = {
@@ -289,34 +271,29 @@ def _process_content_with_gemini(content: str, api_key: str, redirect_url: str, 
         ]
     }
     
-    # 构建请求头 
-    headers = {
-        "Content-Type": "application/json"
-    }
-    
-    # 为不同API服务商设置不同的请求头
-    if redirect_url and "aliyahzombie" in redirect_url:
-        # 使用自定义标头
-        headers = headers_custom
-    elif "key=" not in final_api_url:
-        # 如果URL中没有key参数，则在请求头中添加
-        headers["x-goog-api-key"] = api_key
-    
     # 添加重试逻辑
     max_retries = 3
     retry_delay = 5
     
     for retry in range(max_retries):
         try:
+            # 设置超时时间 - 对于第三方API增加超时时间，它们通常响应较慢
+            timeout = 180 if redirect_url and "generativelanguage.googleapis.com" not in redirect_url else 120
+            logger.debug(f"设置请求超时: {timeout}秒")
+            
             # 发送请求
             logger.debug(f"发送API请求 (尝试 {retry+1}/{max_retries})")
-            response = requests.post(final_api_url, headers=headers, json=request_data, timeout=120)
+            response = requests.post(final_api_url, headers=headers, json=request_data, timeout=timeout)
             
             # 检查响应状态码
             if response.status_code == 200:
                 response_json = response.json()
                 
-                # 提取生成的文本
+                # 增强的响应检测逻辑，支持多种不同的响应格式
+                success = False
+                condensed_text = ""
+                
+                # 标准Gemini格式
                 if ("candidates" in response_json and
                     len(response_json["candidates"]) > 0 and
                     "content" in response_json["candidates"][0] and
@@ -343,18 +320,56 @@ def _process_content_with_gemini(content: str, api_key: str, redirect_url: str, 
                     
                     # 合并所有文本
                     condensed_text = "\n".join([text for text in collected_text if text.strip()])
-                    
-                    if condensed_text.strip():
-                        # 成功获取到压缩后的内容
-                        return condensed_text.strip()
-                    else:
-                        logger.warning("API返回了空内容")
-                        # 尝试记录完整响应进行调试
-                        logger.debug(f"完整响应: {json.dumps(response_json)}")
+                    success = True
                 
-                # 响应格式不符合预期
-                logger.error(f"API响应格式异常")
-                logger.debug(f"异常响应详情: {json.dumps(response_json)}")
+                # 一些第三方API使用不同的响应格式
+                elif "response" in response_json:
+                    condensed_text = response_json["response"]
+                    success = True
+                
+                # 某些代理使用output字段
+                elif "output" in response_json:
+                    condensed_text = response_json["output"]
+                    success = True
+                
+                # 某些API直接返回内容数组
+                elif "results" in response_json:
+                    if isinstance(response_json["results"], list) and len(response_json["results"]) > 0:
+                        condensed_text = str(response_json["results"][0])
+                    elif isinstance(response_json["results"], str):
+                        condensed_text = response_json["results"]
+                    success = True
+                
+                # 某些API将结果封装在data字段中
+                elif "data" in response_json:
+                    data = response_json["data"]
+                    if isinstance(data, dict):
+                        if "candidates" in data and len(data["candidates"]) > 0:
+                            candidate = data["candidates"][0]
+                            if isinstance(candidate, dict) and "content" in candidate:
+                                condensed_text = candidate["content"]
+                            elif isinstance(candidate, str):
+                                condensed_text = candidate
+                        elif "content" in data:
+                            condensed_text = data["content"]
+                        success = True
+                    elif isinstance(data, str):
+                        condensed_text = data
+                        success = True
+                
+                # 某些API使用content作为直接返回
+                elif "content" in response_json:
+                    condensed_text = response_json["content"]
+                    success = True
+                
+                # 有效响应
+                if success and condensed_text.strip():
+                    # 成功获取到压缩后的内容
+                    return condensed_text.strip()
+                else:
+                    logger.warning("API返回了空内容或无法识别的响应格式")
+                    # 尝试记录完整响应进行调试
+                    logger.debug(f"完整响应: {json.dumps(response_json)}")
                 
             else:
                 # 记录详细的错误信息
@@ -589,7 +604,27 @@ def _process_content_with_openai(content: str, api_key: str, redirect_url: str, 
     system_message = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
     
     # 构建正确的API URL格式
-    final_api_url = redirect_url or config.DEFAULT_OPENAI_API_URL
+    # 优先使用配置的redirect_url，如果没有则使用默认URL
+    if redirect_url:
+        # 使用提供的redirect_url作为完整URL
+        final_api_url = redirect_url.strip()
+        logger.debug(f"原始redirect_url: {redirect_url}")
+        
+        # 检查URL是否已经包含chat/completions路径
+        if 'chat/completions' in final_api_url:
+            # URL已经包含了必要的路径，确保没有末尾斜杠
+            if final_api_url.endswith('/') and not final_api_url.endswith('/?'):
+                # 移除末尾的斜杠（但保留查询字符串中的斜杠）
+                final_api_url = final_api_url.rstrip('/')
+        else:
+            # URL不包含必要的路径，需要添加
+            # 首先移除末尾的斜杠（如果有）
+            final_api_url = final_api_url.rstrip('/')
+            # 添加chat/completions路径
+            final_api_url += '/chat/completions'
+    else:
+        # 使用官方OpenAI端点
+        final_api_url = config.DEFAULT_OPENAI_API_URL
     
     # 详细记录URL以便调试
     logger.debug(f"OpenAI API请求URL: {final_api_url}")
@@ -620,37 +655,86 @@ def _process_content_with_openai(content: str, api_key: str, redirect_url: str, 
         "Authorization": f"Bearer {api_key}"
     }
     
+    # 添加基本的User-Agent，提高兼容性
+    headers["User-Agent"] = "Mozilla/5.0 OpenAI API Client"
+    
     # 添加重试逻辑
     max_retries = 3
     retry_delay = 5
     
     for retry in range(max_retries):
         try:
+            # 设置超时时间 - 对于第三方API增加超时时间，它们通常响应较慢
+            timeout = 180 if redirect_url and not "openai.com" in redirect_url else 120
+            logger.debug(f"设置请求超时: {timeout}秒")
+            
             # 发送请求
             logger.debug(f"发送OpenAI API请求 (尝试 {retry+1}/{max_retries})")
-            response = requests.post(final_api_url, headers=headers, json=request_data, timeout=180)
+            response = requests.post(final_api_url, headers=headers, json=request_data, timeout=timeout)
             
             # 检查响应状态码
             if response.status_code == 200:
                 response_json = response.json()
                 
-                # 提取生成的文本
+                # 增强的响应检测逻辑，支持多种不同的响应格式
+                success = False
+                condensed_text = ""
+                
+                # 标准OpenAI格式
                 if "choices" in response_json and len(response_json["choices"]) > 0:
                     choice = response_json["choices"][0]
                     if "message" in choice and "content" in choice["message"]:
                         condensed_text = choice["message"]["content"].strip()
-                        
-                        if condensed_text:
-                            # 成功获取到压缩后的内容
-                            return condensed_text
-                        else:
-                            logger.warning("OpenAI API返回了空内容")
-                            # 尝试记录完整响应进行调试
-                            logger.debug(f"完整响应: {json.dumps(response_json)}")
+                        success = True
                 
-                # 响应格式不符合预期
-                logger.error(f"OpenAI API响应格式异常")
-                logger.debug(f"异常响应详情: {json.dumps(response_json)}")
+                # 一些第三方API使用不同的响应格式
+                elif "response" in response_json:
+                    condensed_text = response_json["response"]
+                    success = True
+                
+                # 某些代理使用output字段
+                elif "output" in response_json:
+                    condensed_text = response_json["output"]
+                    success = True
+                
+                # 某些API直接返回内容数组
+                elif "results" in response_json:
+                    if isinstance(response_json["results"], list) and len(response_json["results"]) > 0:
+                        condensed_text = str(response_json["results"][0])
+                    elif isinstance(response_json["results"], str):
+                        condensed_text = response_json["results"]
+                    success = True
+                
+                # 某些API将结果封装在data字段中
+                elif "data" in response_json:
+                    data = response_json["data"]
+                    if isinstance(data, dict):
+                        if "choices" in data and len(data["choices"]) > 0:
+                            choice = data["choices"][0]
+                            if isinstance(choice, dict) and "message" in choice and "content" in choice["message"]:
+                                condensed_text = choice["message"]["content"]
+                            elif isinstance(choice, str):
+                                condensed_text = choice
+                        elif "content" in data:
+                            condensed_text = data["content"]
+                        success = True
+                    elif isinstance(data, str):
+                        condensed_text = data
+                        success = True
+                
+                # 某些API使用content作为直接返回
+                elif "content" in response_json:
+                    condensed_text = response_json["content"]
+                    success = True
+                
+                # 有效响应
+                if success and condensed_text.strip():
+                    # 成功获取到压缩后的内容
+                    return condensed_text.strip()
+                else:
+                    logger.warning("OpenAI API返回了空内容或无法识别的响应格式")
+                    # 尝试记录完整响应进行调试
+                    logger.debug(f"完整响应: {json.dumps(response_json)}")
                 
             else:
                 # 记录详细的错误信息
@@ -658,6 +742,10 @@ def _process_content_with_openai(content: str, api_key: str, redirect_url: str, 
                 try:
                     error_json = response.json()
                     logger.error(f"错误详情: {json.dumps(error_json)}")
+                    
+                    # 处理HTTP 404错误 - 可能是API路径不正确
+                    if response.status_code == 404:
+                        logger.error("收到404错误，请检查API URL配置是否正确")
                     
                     # 处理HTTP 429 - 配额超限错误
                     if response.status_code == 429:

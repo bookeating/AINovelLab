@@ -447,46 +447,48 @@ class ApiTestTab(QWidget):
                 redirect_url = api_config.get('redirect_url', '')
                 
                 # 构建正确的API URL格式
-                # 不同API服务商可能有不同的URL格式
+                # 优先使用配置的redirect_url，如果没有则使用默认URL
                 final_api_url = ""
                 
                 # 针对官方Google API的正规URL格式
-                if redirect_url and "generativelanguage.googleapis.com" in redirect_url:
-                    # 官方格式: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=YOUR_API_KEY
-                    if ":generateContent" in redirect_url:
-                        # 完整URL已提供
-                        final_api_url = redirect_url
-                    else:
-                        # 只提供了基础URL，需要添加模型和方法
-                        if redirect_url.endswith('/'):
-                            final_api_url = f"{redirect_url}{model}:generateContent"
-                        else:
-                            final_api_url = f"{redirect_url}/{model}:generateContent"
+                if redirect_url:
+                    # 使用配置的重定向URL
+                    final_api_url = redirect_url
                     
-                    # 添加API密钥参数
-                    if "key=" not in final_api_url:
+                    # 如果URL不包含:generateContent后缀，添加模型和方法
+                    if ":generateContent" not in final_api_url:
+                        # 确保URL末尾有斜杠
+                        if not final_api_url.endswith('/'):
+                            final_api_url += '/'
+                        
+                        # 添加模型名和方法
+                        final_api_url += f"{model}:generateContent"
+                else:
+                    # 使用默认URL
+                    final_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                
+                # 构建请求头
+                headers = {
+                    "Content-Type": "application/json"
+                }
+                
+                # 处理API密钥参数
+                if "key=" not in final_api_url:
+                    # 如果URL中没有key参数，根据不同情况处理
+                    if "aliyahzombie" in redirect_url:
+                        # 使用自定义标头
+                        headers["x-goog-api-key"] = api_key
+                    elif redirect_url and "generativelanguage.googleapis.com" not in redirect_url:
+                        # 对于非官方Google API，添加到请求头
+                        headers["x-goog-api-key"] = api_key
+                    else:
+                        # 对于官方Google API，添加到URL
                         if "?" in final_api_url:
                             final_api_url += f"&key={api_key}"
                         else:
                             final_api_url += f"?key={api_key}"
                 
-                # 针对第三方API服务商的URL格式
-                elif redirect_url:
-                    if ":generateContent" in redirect_url:
-                        final_api_url = redirect_url
-                    else:
-                        if redirect_url.endswith('/'):
-                            final_api_url = f"{redirect_url}{model}:generateContent"
-                        else:
-                            final_api_url = f"{redirect_url}/{model}:generateContent"
-                else:
-                    # 使用默认URL格式 
-                    final_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-                    
-                    # 添加API密钥
-                    if "key=" not in final_api_url:
-                        final_api_url += f"?key={api_key}"
-                
+                # 打印请求信息，帮助诊断
                 print(f"Gemini API测试URL: {final_api_url}")
                 
                 # 构建请求体
@@ -504,21 +506,7 @@ class ApiTestTab(QWidget):
                     }
                 }
                 
-                # 构建请求头
-                headers = {
-                    "Content-Type": "application/json"
-                }
-                
-                # 为不同API服务商设置不同的请求头
-                if redirect_url and "aliyahzombie" in redirect_url:
-                    # 使用自定义标头
-                    headers["x-goog-api-key"] = api_key
-                elif "key=" not in final_api_url:
-                    # 如果URL中没有key参数，则在请求头中添加
-                    headers["x-goog-api-key"] = api_key
-                
                 # 打印请求信息，帮助诊断
-                print(f"请求URL: {final_api_url}")
                 print(f"请求头: {headers}")
                 print(f"请求体示例: {json.dumps(request_data, ensure_ascii=False)[:100]}...")
                 
@@ -585,98 +573,18 @@ class ApiTestTab(QWidget):
                     final_api_url = redirect_url.strip()
                     print(f"原始redirect_url: {redirect_url}")
                     
-                    # 确保我们不重复添加路径部分
-                    if final_api_url.endswith('/'):
-                        final_api_url = final_api_url.rstrip('/')
-                    
-                    # 使用正则表达式判断URL是否已经包含API路径
-                    has_api_path = re.search(r'/(api|v1)/.*?(chat/completions|/chat/completions)$', final_api_url) is not None
-                    
-                    # 第三方API的URL处理逻辑（不再限于hf.space）
-                    if "openai.com" in final_api_url:
-                        # 对于官方OpenAI API，使用标准格式
-                        if not has_api_path and not final_api_url.endswith('/v1'):
-                            # 确保使用正确的官方路径
+                    # 检查URL是否已经包含chat/completions路径
+                    if 'chat/completions' in final_api_url:
+                        # URL已经包含了必要的路径，确保没有末尾斜杠
+                        if final_api_url.endswith('/') and not final_api_url.endswith('/?'):
+                            # 移除末尾的斜杠（但保留查询字符串中的斜杠）
                             final_api_url = final_api_url.rstrip('/')
-                            if not final_api_url.endswith('/v1'):
-                                final_api_url += "/v1"
-                            final_api_url += "/chat/completions"
-                    elif has_api_path:
-                        # 如果URL已包含API路径(如/api/v1/chat/completions)，不做修改
-                        print("URL已包含完整API路径，不做修改")
                     else:
-                        # 对于所有其他第三方API，尝试常见的路径格式
-                        print(f"第三方API URL: {final_api_url}")
-                        
-                        # 对于所有第三方API（包括但不限于hf.space）
-                        # 移除URL末尾可能的斜杠
-                        base_url = final_api_url.rstrip('/')
-                        
-                        # 检查是否有子路径需要保留
-                        if "/api" in final_api_url and not final_api_url.endswith("/api"):
-                            # 如果URL已包含/api但不是以/api结尾，检查是否需要添加剩余部分
-                            if not re.search(r'/api/.*?/chat/completions$', final_api_url):
-                                if re.search(r'/api/v1/?$', final_api_url):
-                                    # 如果URL以/api/v1结尾，添加/chat/completions
-                                    final_api_url += "/chat/completions"
-                                elif re.search(r'/api/?$', final_api_url):
-                                    # 如果URL以/api结尾，添加/v1/chat/completions
-                                    final_api_url += "/v1/chat/completions"
-                            print(f"调整后的URL: {final_api_url}")
-                        else:
-                            # 尝试所有可能的路径组合
-                            possible_paths = [
-                                "/api/v1/chat/completions",  # 最常见的格式
-                                "/v1/chat/completions",      # OpenAI兼容格式
-                                "/chat/completions",         # 简化格式
-                                "/api/chat/completions"      # 另一种常见格式
-                            ]
-                            
-                            print(f"测试多种API路径组合...")
-                            found_working_url = False
-                            
-                            # 先尝试使用预检请求(OPTIONS)检查路径是否有效
-                            for path in possible_paths:
-                                test_url = f"{base_url}{path}"
-                                print(f"尝试API路径: {test_url}")
-                                
-                                try:
-                                    # 使用OPTIONS请求预检
-                                    options_headers = {
-                                        "Origin": base_url,
-                                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                                    }
-                                    
-                                    options_response = requests.options(
-                                        test_url, 
-                                        timeout=5,
-                                        headers=options_headers
-                                    )
-                                    
-                                    # 检查是否接受POST方法
-                                    allow_header = options_response.headers.get('Allow', '')
-                                    if 'POST' in allow_header or options_response.status_code < 400:
-                                        print(f"找到有效API路径: {test_url}")
-                                        final_api_url = test_url
-                                        found_working_url = True
-                                        break
-                                    else:
-                                        print(f"路径响应 {options_response.status_code}，但不允许POST")
-                                except Exception as e:
-                                    print(f"测试路径失败: {str(e)}")
-                            
-                            # 如果没找到有效路径，使用最常见的格式
-                            if not found_working_url:
-                                print("未找到有效API路径，使用默认路径")
-                                # 根据URL是否包含某些关键词选择不同的默认路径
-                                if "openai" in base_url.lower():
-                                    # OpenAI风格API
-                                    final_api_url = f"{base_url}/v1/chat/completions"
-                                else:
-                                    # 一般第三方API
-                                    final_api_url = f"{base_url}/api/v1/chat/completions"
-                                
-                            print(f"最终确定的URL: {final_api_url}")
+                        # URL不包含必要的路径，需要添加
+                        # 首先移除末尾的斜杠（如果有）
+                        final_api_url = final_api_url.rstrip('/')
+                        # 添加chat/completions路径
+                        final_api_url += '/chat/completions'
                 else:
                     # 使用官方OpenAI端点
                     final_api_url = "https://api.openai.com/v1/chat/completions"
@@ -702,35 +610,9 @@ class ApiTestTab(QWidget):
                     "Authorization": f"Bearer {api_key}"
                 }
                 
-                # 针对所有第三方API添加浏览器模拟头
-                if redirect_url and not "openai.com" in redirect_url:
-                    print("添加第三方API特殊请求头")
-                    # 通用的浏览器模拟头
-                    headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-                    
-                    # 处理Origin和Referer
-                    try:
-                        # 获取域名部分作为Origin
-                        from urllib.parse import urlparse
-                        parsed_url = urlparse(final_api_url)
-                        origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                        headers["Origin"] = origin
-                        headers["Referer"] = origin + "/"
-                        print(f"设置Origin: {origin}, Referer: {origin}/")
-                        
-                        # 添加额外的浏览器头部，对所有第三方API可能都有用
-                        headers["Accept"] = "application/json, text/plain, */*"
-                        headers["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8"
-                        headers["sec-ch-ua"] = '"Chromium";v="116", "Not)A;Brand";v="24", "Google Chrome";v="116"'
-                        headers["sec-ch-ua-mobile"] = "?0"
-                        headers["sec-ch-ua-platform"] = '"Windows"'
-                        headers["Sec-Fetch-Dest"] = "empty"
-                        headers["Sec-Fetch-Mode"] = "cors"
-                        headers["Sec-Fetch-Site"] = "same-origin"
-                        
-                    except Exception as e:
-                        print(f"解析URL失败: {str(e)}")
-                    
+                # 添加基本的User-Agent，提高兼容性
+                headers["User-Agent"] = "Mozilla/5.0 OpenAI API Test Client"
+                
                 # 打印请求信息，帮助诊断
                 print(f"请求URL: {final_api_url}")
                 print(f"请求头: {headers}")
@@ -810,107 +692,9 @@ class ApiTestTab(QWidget):
                         if hasattr(e, 'response'):
                             error_msg = f"{error_msg} - 响应: {e.response.text[:100]}"
                     
-                    # 特殊处理hf.space的错误
-                    if "hf.space" in final_api_url and status_code == 404:
-                        print("HF Space API返回404，尝试其他URL格式")
-                        
-                        # 如果返回404，可能是路径格式问题，尝试直接访问域名
-                        from urllib.parse import urlparse
-                        parsed_url = urlparse(final_api_url)
-                        base_domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                        
-                        # 尝试其他API路径格式
-                        alternate_paths = [
-                            "/api/v1/chat/completions",
-                            "/v1/chat/completions",
-                            "/chat/completions"
-                        ]
-                        
-                        for alt_path in alternate_paths:
-                            alt_url = f"{base_domain}{alt_path}"
-                            if alt_url != final_api_url:  # 避免重复尝试相同URL
-                                print(f"尝试替代URL: {alt_url}")
-                                
-                                try:
-                                    alt_response = requests.post(
-                                        alt_url, 
-                                        headers=headers,
-                                        json=request_data,
-                                        timeout=15
-                                    )
-                                    
-                                    if alt_response.status_code < 400:
-                                        print(f"替代URL请求成功: {alt_url}")
-                                        # 处理成功响应
-                                        alt_json = alt_response.json()
-                                        if "choices" in alt_json and len(alt_json["choices"]) > 0:
-                                            self.signals.test_complete.emit(api_id, True, "")
-                                            return
-                                except Exception as alt_err:
-                                    print(f"替代URL请求失败: {str(alt_err)}")
-                        
-                        # 如果所有替代URL都失败，记录详细错误
-                        error_msg = f"API连接失败: 所有可能的URL格式都返回错误。原始错误: {error_msg}"
-                    
-                    # 对所有第三方API（非官方OpenAI）进行通用错误处理
-                    elif redirect_url and "openai.com" not in redirect_url and status_code == 404:
-                        print("第三方API返回404，尝试其他常见URL格式")
-                        
-                        # 解析URL，获取基础域名
-                        from urllib.parse import urlparse
-                        parsed_url = urlparse(final_api_url)
-                        base_domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                        
-                        # 尝试各种常见的API路径格式
-                        alternate_paths = [
-                            "/api/v1/chat/completions",
-                            "/v1/chat/completions",
-                            "/chat/completions",
-                            "/api/chat/completions",
-                            # 一些特定路径格式
-                            "/v1/engines/"+model+"/completions",  # 旧版OpenAI格式
-                            "/openai/deployments/"+model+"/chat/completions",  # Azure风格
-                            "/api/openai/v1/chat/completions"  # 某些代理服务使用
-                        ]
-                        
-                        # 根据URL特征添加可能的路径
-                        if "azure" in base_domain:
-                            alternate_paths.append("/openai/deployments/"+model+"/chat/completions?api-version=2023-05-15")
-                        
-                        success = False
-                        for alt_path in alternate_paths:
-                            alt_url = f"{base_domain}{alt_path}"
-                            if alt_url != final_api_url:  # 避免重复尝试相同URL
-                                print(f"尝试替代URL: {alt_url}")
-                                
-                                try:
-                                    # 添加请求参数后的短超时
-                                    alt_response = requests.post(
-                                        alt_url, 
-                                        headers=headers,
-                                        json=request_data,
-                                        timeout=15
-                                    )
-                                    
-                                    if alt_response.status_code < 400:
-                                        print(f"替代URL请求成功: {alt_url}")
-                                        # 处理成功响应
-                                        try:
-                                            alt_json = alt_response.json()
-                                            if ("choices" in alt_json and len(alt_json["choices"]) > 0) or \
-                                               ("response" in alt_json) or \
-                                               ("output" in alt_json):
-                                                success = True
-                                                self.signals.test_complete.emit(api_id, True, "")
-                                                return
-                                        except:
-                                            print("响应不是有效的JSON")
-                                except Exception as alt_err:
-                                    print(f"替代URL请求失败: {str(alt_err)}")
-                        
-                        if not success:
-                            # 记录详细错误信息
-                            error_msg = f"API连接失败: 尝试了多种URL格式但均失败。原始错误: {error_msg}"
+                    # 处理HTTP 404错误 - 可能是API路径不正确
+                    if status_code == 404:
+                        error_msg = f"API URL路径可能不正确({final_api_url})，请检查URL配置。错误: {error_msg}"
                     
                     self.signals.test_complete.emit(api_id, False, f"HTTP错误 {status_code}: {error_msg}")
                     return
