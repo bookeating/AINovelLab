@@ -5,8 +5,25 @@
 """
 
 import os
-from PyQt5.QtWidgets import QMainWindow, QTabWidget
+import sys
+from PyQt5.QtWidgets import QMainWindow, QTabWidget, QStatusBar
 from PyQt5.QtCore import QSize, pyqtSignal
+
+# 导入版本信息（添加更健壮的错误处理）
+VERSION_STRING = "AI小说实验室"  # 默认版本字符串，如果无法导入版本模块则使用此值
+try:
+    from ..version import get_version_string
+    VERSION_STRING = get_version_string()
+except ImportError:
+    try:
+        # 尝试其他导入路径
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from version import get_version_string
+        VERSION_STRING = get_version_string()
+    except ImportError:
+        print("警告: 无法导入版本信息模块，将使用默认版本信息")
+    except Exception as e:
+        print(f"警告: 导入版本信息时发生错误: {e}")
 
 from .home_tab import HomeTab
 from .epub_splitter_tab import EpubSplitterTab
@@ -28,7 +45,7 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         # 设置窗口标题和大小
-        self.setWindowTitle("AI小说实验室")
+        self.setWindowTitle(VERSION_STRING)
         self.setMinimumSize(800, 600)
         
         # 创建标签页控件
@@ -48,6 +65,11 @@ class MainWindow(QMainWindow):
         
         # 设置中央控件
         self.setCentralWidget(self.tabs)
+        
+        # 创建并设置状态栏
+        status_bar = QStatusBar()
+        self.setStatusBar(status_bar)
+        status_bar.showMessage(VERSION_STRING)
         
         # 显示窗口
         self.show()

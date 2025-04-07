@@ -24,10 +24,39 @@ def main():
     is_frozen = getattr(sys, 'frozen', False)
     print(f"是否在打包环境中运行: {is_frozen}")
     
+    # 确保版本模块可用
+    try:
+        # 检查版本文件是否存在
+        import importlib.util
+        version_paths = [
+            os.path.join(current_dir, 'version.py'),
+            os.path.join(current_dir, 'src', 'version.py')
+        ]
+        
+        version_found = False
+        for version_path in version_paths:
+            if os.path.exists(version_path):
+                print(f"找到版本文件: {version_path}")
+                version_found = True
+                # 如果运行在冻结环境中，复制版本文件到根目录以确保可以导入
+                if is_frozen and not os.path.exists(os.path.join(current_dir, 'version.py')):
+                    try:
+                        import shutil
+                        shutil.copy(version_path, os.path.join(current_dir, 'version.py'))
+                        print("已复制版本文件到根目录以确保可访问")
+                    except Exception as e:
+                        print(f"复制版本文件时出错: {e}")
+        
+        if not version_found:
+            print("警告: 未找到版本文件")
+    except Exception as e:
+        print(f"检查版本文件时出错: {e}")
+    
     # 对于打包环境，调整导入策略
     if is_frozen:
         # 直接导入主窗口，跳过src模块导入
         try:
+            print("在打包环境中导入GUI组件...")
             from gui.main_window import MainWindow
             import PyQt5.QtWidgets as QtWidgets
             
@@ -42,6 +71,7 @@ def main():
     else:
         # 开发环境中的导入方式
         try:
+            print("在开发环境中启动应用程序...")
             # 导入导入辅助模块并设置路径
             import src.import_helper as helper
             helper.setup_paths()
