@@ -46,6 +46,11 @@ DEFAULT_KEY_RPM = 5  # 每个密钥默认每分钟请求数
 DEFAULT_MAX_RPM = 20  # 默认全局最大每分钟请求数
 GEMINI_API_CONFIG = []  # 从配置文件加载
 
+# OpenAI API 配置
+DEFAULT_OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo"
+OPENAI_API_CONFIG = []  # 从配置文件加载
+
 # 脱水比例常量
 MIN_CONDENSATION_RATIO = 30  # 最小压缩比例（百分比）
 MAX_CONDENSATION_RATIO = 50  # 最大压缩比例（百分比）
@@ -68,7 +73,7 @@ def load_api_config():
     Returns:
         bool: 配置加载是否成功
     """
-    global GEMINI_API_CONFIG, DEFAULT_MAX_RPM
+    global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
     
     import json
     
@@ -79,14 +84,20 @@ def load_api_config():
         with open(CONFIG_FILE_PATH, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
             
+        # 加载Gemini API配置
         if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
             GEMINI_API_CONFIG = config_data['gemini_api']
+        
+        # 加载OpenAI API配置
+        if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
+            OPENAI_API_CONFIG = config_data['openai_api']
             
-            # 加载max_rpm值（如果存在）
-            if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
-                DEFAULT_MAX_RPM = config_data['max_rpm']
+        # 加载max_rpm值（如果存在）
+        if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
+            DEFAULT_MAX_RPM = config_data['max_rpm']
                 
-            return len(GEMINI_API_CONFIG) > 0
+        # 至少有一种API配置加载成功即可
+        return len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0
             
     except Exception as e:
         print(f"加载配置文件失败: {e}")

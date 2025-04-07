@@ -139,20 +139,22 @@ def main():
         template_config = {
             "gemini_api": [
                 {
-                    "key": "您的Gemini_API密钥1",
-                    "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
-                    "model": "gemini-2.0-flash",
+                    "key": "你的gemini 密钥",
+                    "redirect_url": "代理url 地址，可空。默认：https://generativelanguage.googleapis.com/v1beta/models",
+                    "model": "模型，可空。默认：gemini-2.0-flash",
                     "rpm": 10
-                },
+                },{
+                    "key":"最简配置demo"
+                }
+            ],
+            "openai_api": [
                 {
-                    "key": "您的Gemini_API密钥2",
+                    "key": "你的openai 密钥或其他一切兼容openai-api 格式的,如DeepSeek等",
+                    "redirect_url": "代理url，可空。默认：https://api.openai.com/v1/chat/completions",
+                    "model": "模型，可空。默认：gpt-3.5-turbo",
                     "rpm": 10
-                },
-                {
-                    "key": "您的中转API密钥",
-                    "redirect_url": "https://api.example.com/v1beta/models",
-                    "model": "gemini-2.0-flash",
-                    "rpm": 10
+                },{
+                    "key":"最简配置demo"
                 }
             ],
             "max_rpm": 20
@@ -167,24 +169,26 @@ def main():
         
         print(f"配置模板文件已创建: {template_path}")
         
-        # 创建调试运行批处理文件
-        debug_bat_path = os.path.join(output_dir, "debug_run.bat")
-        with open(debug_bat_path, "w", encoding="utf-8") as f:
-            f.write("@echo off\n")
-            f.write("echo 开始调试模式运行 AINovelLab\n")
-            f.write("echo 如有错误将显示在此窗口\n")
-            f.write("echo -----------------------------------\n")
-            f.write("AINovelLab.exe\n")
-            f.write("echo -----------------------------------\n")
-            f.write("echo 程序已退出，错误代码: %ERRORLEVEL%\n")
-            f.write("pause\n")
-        
-        print(f"调试批处理文件已创建: {debug_bat_path}")
+        # 创建调试运行批处理文件 - 仅在非控制台模式下创建
+        if not console_mode:
+            debug_bat_path = os.path.join(output_dir, "debug_run.bat")
+            with open(debug_bat_path, "w", encoding="utf-8") as f:
+                f.write("@echo off\n")
+                f.write("echo 开始调试模式运行 AINovelLab\n")
+                f.write("echo 如有错误将显示在此窗口\n")
+                f.write("echo -----------------------------------\n")
+                f.write("AINovelLab.exe\n")
+                f.write("echo -----------------------------------\n")
+                f.write("echo 程序已退出，错误代码: %ERRORLEVEL%\n")
+                f.write("pause\n")
+            
+            print(f"调试批处理文件已创建: {debug_bat_path}")
         
         print("\n提示：")
         print("1. api_keys.json模板文件已创建，请根据需要修改API密钥")
         print("2. 将api_keys.json放在可执行文件同级目录可以方便修改API密钥")
-        print("3. 如果程序无法启动，请运行debug_run.bat查看错误信息")
+        if not console_mode:
+            print("3. 如果程序无法启动，请运行debug_run.bat查看错误信息")
         print("4. 如果出现'无法启动此程序，因为系统中丢失xxx.dll'错误，请安装Microsoft Visual C++ Redistributable")
         print("5. 建议安装最新版本的Visual C++ Redistributable和Universal C Runtime")
         print("6. 下载地址: https://aka.ms/vs/17/release/vc_redist.x64.exe")

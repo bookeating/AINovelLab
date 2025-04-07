@@ -207,6 +207,7 @@ class WorkerThread(QThread):
         end_chapter = self.args.get('end_chapter', len(input_files))
         output_dir = self.args.get('output_dir', '')
         force_regenerate = self.args.get('force_regenerate', False)  # 获取强制生成参数
+        api_type = self.args.get('api_type', 'gemini')  # 获取API类型，默认为gemini
         
         print(f"选择脱水章节范围: {start_chapter} - {end_chapter}", flush=True)
         if output_dir:
@@ -215,6 +216,7 @@ class WorkerThread(QThread):
             file_utils.OUTPUT_DIR = output_dir
         
         print(f"强制生成模式: {'开启' if force_regenerate else '关闭'}", flush=True)
+        print(f"API类型: {api_type}", flush=True)
         
         # 获取并显示并发数
         concurrency = 1
@@ -362,9 +364,10 @@ class WorkerThread(QThread):
                 success_count, failed_file_dict = process_files_concurrently(
                     files_to_process, 
                     max_workers=concurrency,
+                    api_type=api_type,  # 使用选择的API类型
                     force_regenerate=force_regenerate,
-                    update_progress_func=lambda current, total, status: self.update_progress.emit(
-                        int(current * 100 / total), f"脱水处理进度: {current}/{total} - {status}"
+                    update_progress_func=lambda current, total, status=None: self.update_progress.emit(
+                        int(current * 100 / total), f"脱水处理进度: {current}/{total}{' - ' + status if status else ''}"
                     )
                 )
                 
@@ -419,7 +422,7 @@ class WorkerThread(QThread):
                 
                 try:
                     # 使用原始API，不传递output_dir参数，因为已经设置了全局OUTPUT_DIR
-                    process_single_file(file_path)
+                    process_single_file(file_path, api_type=api_type)
                     print(f"文件处理完成: {base_name}", flush=True)
                     processed_count += 1
                 except Exception as e:

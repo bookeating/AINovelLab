@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-API服务模块 - 处理Gemini API的调用和响应
+API服务模块 - 处理Gemini API和OpenAI API的调用和响应
 """
 
 import json
 import requests
 import time
 import traceback
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any, Union
 
 # 导入配置和工具
 try:
@@ -29,6 +29,13 @@ try:
     global_key_manager = main.gemini_key_manager
 except (ImportError, AttributeError):
     global_key_manager = None
+
+# 尝试导入全局openai_key_manager
+try:
+    from . import main
+    global_openai_key_manager = main.openai_key_manager
+except (ImportError, AttributeError):
+    global_openai_key_manager = None
 
 def condense_novel_gemini(content: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
     """使用Gemini API对小说内容进行压缩处理
@@ -407,6 +414,283 @@ def _process_content_with_gemini(content: str, api_key: str, redirect_url: str, 
                 
         except Exception as e:
             logger.error(f"请求处理过程中发生错误: {e}")
+            logger.debug(traceback.format_exc())
+            if retry < max_retries - 1:
+                sleep_time = retry_delay * (2 ** retry)
+                logger.debug(f"将在 {sleep_time} 秒后重试...")
+                time.sleep(sleep_time)
+            else:
+                logger.error("已达到最大重试次数，处理失败")
+    
+    # 所有重试都失败
+    return None
+
+def condense_novel_openai(content: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
+    """使用OpenAI API对小说内容进行压缩处理
+    
+    Args:
+        content: 小说内容
+        api_key_config: API密钥配置
+        key_manager: API密钥管理器实例
+
+    Returns:
+        Optional[str]: 压缩后的内容，处理失败则返回None
+    """
+    # 如果内容为空，直接返回空字符串
+    if not content or len(content.strip()) == 0:
+        logger.warning("输入内容为空，无法处理")
+        return ""
+    
+    # 获取API密钥配置
+    if api_key_config is None:
+        # 优先使用传入的key_manager
+        if key_manager is None:
+            # 尝试使用全局key_manager
+            if global_openai_key_manager is not None:
+                key_manager = global_openai_key_manager
+                logger.debug("使用全局OpenAI API密钥管理器")
+            else:
+                # 尝试动态导入main模块中的key_manager（避免循环导入问题）
+                try:
+                    # 仅当直接运行此模块时才需要这样导入
+                    import sys
+                    if 'main' in sys.modules:
+                        main_module = sys.modules['main']
+                        if hasattr(main_module, 'openai_key_manager') and main_module.openai_key_manager is not None:
+                            key_manager = main_module.openai_key_manager
+                            logger.debug("从main模块动态获取到OpenAI API密钥管理器")
+                        else:
+                            logger.debug("main模块中未找到openai_key_manager")
+                    elif 'novel_condenser.main' in sys.modules:
+                        main_module = sys.modules['novel_condenser.main']
+                        if hasattr(main_module, 'openai_key_manager') and main_module.openai_key_manager is not None:
+                            key_manager = main_module.openai_key_manager
+                            logger.debug("从novel_condenser.main模块动态获取到OpenAI API密钥管理器")
+                        else:
+                            logger.debug("novel_condenser.main模块中未找到openai_key_manager")
+                except Exception as e:
+                    logger.debug(f"尝试动态获取OpenAI key_manager时出错: {e}")
+                
+                # 只有在没有其他选择时才创建新的APIKeyManager
+                if key_manager is None:
+                    logger.warning("未找到现有的OpenAI API密钥管理器，创建临时管理器")
+                    key_manager = APIKeyManager(config.OPENAI_API_CONFIG, config.DEFAULT_MAX_RPM)
+        
+        # 从key_manager获取API密钥配置
+        api_key_config = key_manager.get_key_config()
+        
+        if api_key_config is None:
+            # 检查是否因为所有密钥都被跳过而无法获取密钥
+            if key_manager and hasattr(key_manager, 'skipped_keys'):
+                valid_keys = [api_conf['key'] for api_conf in key_manager.api_configs 
+                             if api_conf['key'] not in key_manager.skipped_keys]
+                if not valid_keys:
+                    logger.error("所有OpenAI API密钥都因失败次数过多被跳过，脱水过程结束")
+                    return None
+                
+            logger.error("无法获取可用的OpenAI API密钥，请检查配置或等待密钥冷却期结束")
+            return None
+    
+    api_key = api_key_config.get('key')
+    redirect_url = api_key_config.get('redirect_url')
+    model = api_key_config.get('model', config.DEFAULT_OPENAI_MODEL)
+    
+    # 计算内容长度，超长的内容需要分段处理
+    content_length = len(content)
+    max_chunk_length = 20000  # 单次处理的最大字符数
+    
+    # 如果内容长度小于阈值，则直接处理
+    if content_length <= max_chunk_length:
+        return _process_content_with_openai(content, api_key, redirect_url, model)
+    
+    # 否则分段处理
+    logger.debug(f"内容长度为 {content_length} 字符，将分段处理...")
+    
+    # 分段计算
+    chunk_size = max_chunk_length
+    total_chunks = (content_length + chunk_size - 1) // chunk_size
+    logger.debug(f"将分为 {total_chunks} 段进行处理")
+    
+    # 存储各段的处理结果
+    condensed_chunks = []
+    
+    # 分段处理
+    for i in range(total_chunks):
+        start_pos = i * chunk_size
+        end_pos = min(start_pos + chunk_size, content_length)
+        chunk = content[start_pos:end_pos]
+        
+        logger.debug(f"处理第 {i+1}/{total_chunks} 段，字符范围: {start_pos}-{end_pos}...")
+        
+        # 处理当前段
+        condensed_chunk = _process_content_with_openai(
+            chunk, api_key, redirect_url, model, 
+            is_chunk=True, chunk_index=i+1, total_chunks=total_chunks
+        )
+        
+        if condensed_chunk is None:
+            # 如果有一段处理失败，则尝试获取新的API密钥
+            logger.warning(f"第 {i+1} 段处理失败，尝试获取新的API密钥...")
+            
+            if key_manager:
+                # 报告当前密钥错误
+                key_manager.report_error(api_key)
+                
+                # 获取新的API密钥
+                api_key_config = key_manager.get_key_config()
+                if api_key_config:
+                    api_key = api_key_config.get('key')
+                    redirect_url = api_key_config.get('redirect_url')
+                    model = api_key_config.get('model', config.DEFAULT_OPENAI_MODEL)
+                    
+                    # 重试当前段
+                    logger.debug(f"使用新的API密钥重试第 {i+1} 段...")
+                    condensed_chunk = _process_content_with_openai(
+                        chunk, api_key, redirect_url, model, 
+                        is_chunk=True, chunk_index=i+1, total_chunks=total_chunks
+                    )
+        
+        if condensed_chunk is None:
+            logger.error(f"第 {i+1} 段处理失败，已尝试所有可用的API密钥")
+            return None
+        
+        condensed_chunks.append(condensed_chunk)
+    
+    # 合并处理结果
+    condensed_content = "\n\n".join(condensed_chunks)
+    
+    if key_manager:
+        # 报告成功
+        key_manager.report_success(api_key)
+        
+    return condensed_content
+
+def _process_content_with_openai(content: str, api_key: str, redirect_url: str, model: str, 
+                               is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0) -> Optional[str]:
+    """使用OpenAI API处理单个内容块
+    
+    Args:
+        content: 要处理的内容
+        api_key: API密钥
+        redirect_url: API端点URL
+        model: 模型名称
+        is_chunk: 是否为分块处理的一部分
+        chunk_index: 分块索引
+        total_chunks: 总分块数
+    
+    Returns:
+        Optional[str]: 处理后的内容，处理失败则返回None
+    """
+    # 构建提示词
+    prefix = ""
+    if is_chunk:
+        prefix = f"这是一个小说的第{chunk_index}段，共{total_chunks}段。"
+    
+    system_message = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的30%-50%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
+    
+    # 构建正确的API URL格式
+    final_api_url = redirect_url or config.DEFAULT_OPENAI_API_URL
+    
+    # 详细记录URL以便调试
+    logger.debug(f"OpenAI API请求URL: {final_api_url}")
+    
+    # 构建OpenAI格式的请求体
+    request_data = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_message
+            },
+            {
+                "role": "user",
+                "content": content
+            }
+        ],
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "top_p": 0.8,
+        "frequency_penalty": 0,
+        "presence_penalty": 0
+    }
+    
+    # 构建请求头 
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    # 添加重试逻辑
+    max_retries = 3
+    retry_delay = 5
+    
+    for retry in range(max_retries):
+        try:
+            # 发送请求
+            logger.debug(f"发送OpenAI API请求 (尝试 {retry+1}/{max_retries})")
+            response = requests.post(final_api_url, headers=headers, json=request_data, timeout=180)
+            
+            # 检查响应状态码
+            if response.status_code == 200:
+                response_json = response.json()
+                
+                # 提取生成的文本
+                if "choices" in response_json and len(response_json["choices"]) > 0:
+                    choice = response_json["choices"][0]
+                    if "message" in choice and "content" in choice["message"]:
+                        condensed_text = choice["message"]["content"].strip()
+                        
+                        if condensed_text:
+                            # 成功获取到压缩后的内容
+                            return condensed_text
+                        else:
+                            logger.warning("OpenAI API返回了空内容")
+                            # 尝试记录完整响应进行调试
+                            logger.debug(f"完整响应: {json.dumps(response_json)}")
+                
+                # 响应格式不符合预期
+                logger.error(f"OpenAI API响应格式异常")
+                logger.debug(f"异常响应详情: {json.dumps(response_json)}")
+                
+            else:
+                # 记录详细的错误信息
+                logger.error(f"OpenAI API请求失败: HTTP {response.status_code}")
+                try:
+                    error_json = response.json()
+                    logger.error(f"错误详情: {json.dumps(error_json)}")
+                    
+                    # 处理HTTP 429 - 配额超限错误
+                    if response.status_code == 429:
+                        retry_delay_seconds = 60  # 默认等待60秒
+                        
+                        logger.warning(f"OpenAI API配额超限，将等待{retry_delay_seconds}秒后重试...")
+                        time.sleep(retry_delay_seconds)
+                        # 如果是最后一次重试，不要增加重试计数，直接再试一次
+                        if retry == max_retries - 1:
+                            retry -= 1
+                        continue  # 跳过下面的重试逻辑，直接开始下一次循环
+                except:
+                    logger.error(f"响应内容: {response.text}")
+            
+            # 如果还有重试次数，则等待后重试
+            if retry < max_retries - 1:
+                sleep_time = retry_delay * (2 ** retry)
+                logger.debug(f"将在 {sleep_time} 秒后重试...")
+                time.sleep(sleep_time)
+            else:
+                logger.error(f"已达到最大重试次数，处理失败")
+                
+        except requests.exceptions.Timeout:
+            logger.warning("OpenAI API请求超时")
+            if retry < max_retries - 1:
+                sleep_time = retry_delay * (2 ** retry)
+                logger.debug(f"将在 {sleep_time} 秒后重试...")
+                time.sleep(sleep_time)
+            else:
+                logger.error("已达到最大重试次数，处理失败")
+                
+        except Exception as e:
+            logger.error(f"OpenAI请求处理过程中发生错误: {e}")
             logger.debug(traceback.format_exc())
             if retry < max_retries - 1:
                 sleep_time = retry_delay * (2 ** retry)

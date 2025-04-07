@@ -8,7 +8,7 @@ import os
 import sys
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                            QFileDialog, QMessageBox, QProgressBar, QTextEdit, 
-                           QSpinBox, QGroupBox, QLineEdit, QCheckBox)
+                           QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QTextCursor
 
@@ -117,7 +117,22 @@ class CondenserTab(QWidget):
         self.force_regenerate_checkbox = QCheckBox("强制生成")
         self.force_regenerate_checkbox.setToolTip("勾选后将强制重新脱水，否则跳过已存在的文件")
         
+        # 创建API类型组合框，始终使用混合模式
+        self.api_type_combo = QComboBox()
+        self.api_type_combo.addItem("Gemini", "gemini")
+        self.api_type_combo.addItem("OpenAI", "openai") 
+        self.api_type_combo.addItem("混合使用", "mixed")
+        self.api_type_combo.setCurrentIndex(2)  # 默认选择混合模式
+        
+        # 不再显示API类型选择界面
+        # api_type_layout = QHBoxLayout()
+        # api_type_label = QLabel("API类型:")
+        # api_type_layout.addWidget(api_type_label)
+        # api_type_layout.addWidget(self.api_type_combo)
+        # api_type_layout.addStretch()
+        
         options_layout.addWidget(self.force_regenerate_checkbox)
+        # options_layout.addLayout(api_type_layout)
         options_group.setLayout(options_layout)
         
         # 状态和进度
@@ -331,18 +346,50 @@ class CondenserTab(QWidget):
                                   "未找到有效的API密钥配置。请先在设置中配置API密钥。")
                 return
         
-        # 检查是否已初始化API密钥管理器
+        # 获取当前选择的API类型，确保使用混合模式
+        api_type = "mixed"  # 始终使用混合模式
+        
+        # 检查Gemini API密钥管理器
+        gemini_initialized = False
         if not hasattr(main_module, 'gemini_key_manager') or main_module.gemini_key_manager is None:
             # 尝试初始化API密钥管理器
-            try:
-                main_module.gemini_key_manager = key_manager.APIKeyManager(
-                    config.GEMINI_API_CONFIG,
-                    config.DEFAULT_MAX_RPM
-                )
-            except Exception as e:
-                QMessageBox.warning(self, "API密钥管理器初始化失败",
-                                  f"无法初始化API密钥管理器: {str(e)}")
-                return
+            if hasattr(config, 'GEMINI_API_CONFIG') and config.GEMINI_API_CONFIG:
+                try:
+                    main_module.gemini_key_manager = key_manager.APIKeyManager(
+                        config.GEMINI_API_CONFIG,
+                        config.DEFAULT_MAX_RPM
+                    )
+                    gemini_initialized = True
+                except Exception as e:
+                    self.add_log(f"Gemini API密钥管理器初始化失败: {str(e)}")
+            else:
+                self.add_log("未找到有效的Gemini API配置，将只使用OpenAI API")
+        else:
+            gemini_initialized = True
+        
+        # 检查OpenAI API密钥管理器
+        openai_initialized = False
+        if not hasattr(main_module, 'openai_key_manager') or main_module.openai_key_manager is None:
+            # 尝试初始化API密钥管理器
+            if hasattr(config, 'OPENAI_API_CONFIG') and config.OPENAI_API_CONFIG:
+                try:
+                    main_module.openai_key_manager = key_manager.APIKeyManager(
+                        config.OPENAI_API_CONFIG,
+                        config.DEFAULT_MAX_RPM
+                    )
+                    openai_initialized = True
+                except Exception as e:
+                    self.add_log(f"OpenAI API密钥管理器初始化失败: {str(e)}")
+            else:
+                self.add_log("未找到有效的OpenAI API配置，将只使用Gemini API")
+        else:
+            openai_initialized = True
+        
+        # 检查是否至少有一个API可用
+        if not gemini_initialized and not openai_initialized:
+            QMessageBox.warning(self, "API配置缺失", 
+                              "未找到有效的API密钥配置。请先在设置中配置至少一种API密钥。")
+            return
         
         # 检查输入参数
         folder_path = self.folder_path_edit.text()
@@ -365,7 +412,8 @@ class CondenserTab(QWidget):
             'start_chapter': self.start_chapter_spin.value(),
             'end_chapter': self.end_chapter_spin.value(),
             'output_dir': self.output_dir,
-            'force_regenerate': self.force_regenerate_checkbox.isChecked()  # 添加强制生成选项
+            'force_regenerate': self.force_regenerate_checkbox.isChecked(),
+            'api_type': api_type  # 始终使用混合模式
         }
         
         # 创建并启动工作线程
@@ -383,6 +431,15 @@ class CondenserTab(QWidget):
         self.add_log(f"开始脱水处理，章节范围: {self.start_chapter_spin.value()} - {self.end_chapter_spin.value()}")
         self.add_log(f"脱水输出目录: {self.output_dir}")
         self.add_log(f"强制生成模式: {'开启' if self.force_regenerate_checkbox.isChecked() else '关闭'}")
+        self.add_log(f"API模式: 混合模式 (自动选择Gemini或OpenAI API)")
+        
+        # API可用性信息
+        if gemini_initialized and openai_initialized:
+            self.add_log("两种API均已成功初始化，将优化资源利用")
+        elif gemini_initialized:
+            self.add_log("注意: 仅初始化了Gemini API")
+        elif openai_initialized:
+            self.add_log("注意: 仅初始化了OpenAI API")
         
         # 启动线程
         self.worker_thread.start()

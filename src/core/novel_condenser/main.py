@@ -22,7 +22,7 @@ try:
         save_directory_file, find_matching_files, get_output_file_path,
         get_cached_content, create_cache_for_file
     )
-    from .api_service import condense_novel_gemini, print_processing_stats
+    from .api_service import condense_novel_gemini, condense_novel_openai, print_processing_stats
     from .stats import statistics, reset_statistics, update_file_stats, finalize_statistics, print_processing_summary
     from ..utils import setup_logger
 except ImportError:
@@ -33,7 +33,7 @@ except ImportError:
         save_directory_file, find_matching_files, get_output_file_path,
         get_cached_content, create_cache_for_file
     )
-    from api_service import condense_novel_gemini, print_processing_stats
+    from api_service import condense_novel_gemini, condense_novel_openai, print_processing_stats
     from stats import statistics, reset_statistics, update_file_stats, finalize_statistics, print_processing_summary
     from utils import setup_logger
 
@@ -43,12 +43,14 @@ logger = setup_logger(__name__)
 # 全局变量
 OUTPUT_DIR = None  # 输出目录
 gemini_key_manager = None  # Gemini API密钥管理器
+openai_key_manager = None  # OpenAI API密钥管理器
 
-def process_single_file(file_path, api_key_config=None, file_index=None, total_files=None, retry_attempt=0, force_regenerate=False):
+def process_single_file(file_path, api_type="gemini", api_key_config=None, file_index=None, total_files=None, retry_attempt=0, force_regenerate=False):
     """处理单个文件
     
     Args:
         file_path: 文件路径
+        api_type: API类型，"gemini"或"openai"
         api_key_config: API密钥配置
         file_index: 当前文件索引
         total_files: 总文件数
@@ -58,7 +60,7 @@ def process_single_file(file_path, api_key_config=None, file_index=None, total_f
     Returns:
         处理成功返回True，处理失败返回False
     """
-    global gemini_key_manager
+    global gemini_key_manager, openai_key_manager
     
     # 获取开始时间
     local_start_time = time.time()
@@ -215,7 +217,7 @@ def process_single_file(file_path, api_key_config=None, file_index=None, total_f
             
             return True
         
-        # 调用Gemini API进行脱水
+        # 调用API进行脱水
         # 创建重试机制，最多尝试3次不同的API密钥
         max_api_attempts = 3
         success = False
@@ -223,33 +225,63 @@ def process_single_file(file_path, api_key_config=None, file_index=None, total_f
         all_keys_skipped = False
         
         # 确保使用全局API密钥管理器
-        if gemini_key_manager is None:
-            logger.warning("全局API密钥管理器未初始化，正在创建新实例")
-            gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
-        
-        for api_attempt in range(max_api_attempts):
-            if api_attempt > 0:
-                logger.debug(f"尝试使用新的API密钥进行第{api_attempt+1}次尝试...")
-                api_key_config = None  # 重新获取密钥
+        if api_type == "gemini":
+            if gemini_key_manager is None:
+                logger.warning("全局Gemini API密钥管理器未初始化，正在创建新实例")
+                gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
             
-            # 确保始终传递gemini_key_manager给API服务
-            result = condense_novel_gemini(content, api_key_config, gemini_key_manager)
-            
-            # 检查是否因为所有密钥都被跳过而失败
-            if result is None and gemini_key_manager and hasattr(gemini_key_manager, 'skipped_keys'):
-                valid_keys = [conf['key'] for conf in gemini_key_manager.api_configs 
-                              if conf['key'] not in gemini_key_manager.skipped_keys]
-                if not valid_keys:
-                    all_keys_skipped = True
-                    logger.warning(f"处理文件 {base_name} 失败：所有API密钥都因失败次数过多而被跳过")
+            for api_attempt in range(max_api_attempts):
+                if api_attempt > 0:
+                    logger.debug(f"尝试使用新的Gemini API密钥进行第{api_attempt+1}次尝试...")
+                    api_key_config = None  # 重新获取密钥
+                
+                # 确保始终传递gemini_key_manager给API服务
+                result = condense_novel_gemini(content, api_key_config, gemini_key_manager)
+                
+                # 检查是否因为所有密钥都被跳过而失败
+                if result is None and gemini_key_manager and hasattr(gemini_key_manager, 'skipped_keys'):
+                    valid_keys = [conf['key'] for conf in gemini_key_manager.api_configs 
+                                  if conf['key'] not in gemini_key_manager.skipped_keys]
+                    if not valid_keys:
+                        all_keys_skipped = True
+                        logger.warning(f"处理文件 {base_name} 失败：所有Gemini API密钥都因失败次数过多而被跳过")
+                        break
+                
+                if result:
+                    success = True
                     break
+                elif gemini_key_manager and api_key_config:
+                    # 报告当前密钥错误
+                    gemini_key_manager.report_error(api_key_config['key'])
+        
+        elif api_type == "openai":
+            if openai_key_manager is None:
+                logger.warning("全局OpenAI API密钥管理器未初始化，正在创建新实例")
+                openai_key_manager = APIKeyManager(config.OPENAI_API_CONFIG, config.DEFAULT_MAX_RPM)
             
-            if result:
-                success = True
-                break
-            elif gemini_key_manager and api_key_config:
-                # 报告API密钥错误
-                gemini_key_manager.report_error(api_key_config)
+            for api_attempt in range(max_api_attempts):
+                if api_attempt > 0:
+                    logger.debug(f"尝试使用新的OpenAI API密钥进行第{api_attempt+1}次尝试...")
+                    api_key_config = None  # 重新获取密钥
+                
+                # 确保始终传递openai_key_manager给API服务
+                result = condense_novel_openai(content, api_key_config, openai_key_manager)
+                
+                # 检查是否因为所有密钥都被跳过而失败
+                if result is None and openai_key_manager and hasattr(openai_key_manager, 'skipped_keys'):
+                    valid_keys = [conf['key'] for conf in openai_key_manager.api_configs 
+                                  if conf['key'] not in openai_key_manager.skipped_keys]
+                    if not valid_keys:
+                        all_keys_skipped = True
+                        logger.warning(f"处理文件 {base_name} 失败：所有OpenAI API密钥都因失败次数过多而被跳过")
+                        break
+                
+                if result:
+                    success = True
+                    break
+                elif openai_key_manager and api_key_config:
+                    # 报告当前密钥错误
+                    openai_key_manager.report_error(api_key_config['key'])
         
         if success and result:
             # 保存脱水后的内容
@@ -331,141 +363,187 @@ def process_single_file(file_path, api_key_config=None, file_index=None, total_f
         return False
 
 def process_files_sequentially(file_paths: List[str], total_files: int, 
-                              force_regenerate: bool = False, retry_attempt: int = 0) -> Tuple[int, Dict[str, int]]:
+                          api_type: str = "gemini", force_regenerate: bool = False, retry_attempt: int = 0) -> Tuple[int, Dict[str, int]]:
     """顺序处理文件
-
+    
     Args:
         file_paths: 文件路径列表
         total_files: 总文件数
+        api_type: API类型，gemini或openai
         force_regenerate: 是否强制重新生成
         retry_attempt: 当前重试次数
-
+    
     Returns:
         成功处理的文件数和失败的文件字典
     """
-    global gemini_key_manager
     success_count = 0
     failed_files = {}
     
     for i, file_path in enumerate(file_paths):
-        result = process_single_file(file_path, file_index=i+1, total_files=total_files, 
-                                 retry_attempt=retry_attempt, force_regenerate=force_regenerate)
-        
-        if result:
-            success_count += 1
-        else:
-            # 记录失败的文件
-            failed_files[file_path] = retry_attempt + 1
+        try:
+            status = process_single_file(
+                file_path, 
+                api_type=api_type, 
+                file_index=i+1, 
+                total_files=total_files, 
+                retry_attempt=retry_attempt,
+                force_regenerate=force_regenerate
+            )
             
-            # 检查是否因为所有密钥都被跳过而失败
-            if gemini_key_manager and hasattr(gemini_key_manager, 'skipped_keys'):
-                valid_keys = [config['key'] for config in gemini_key_manager.api_configs 
-                             if config['key'] not in gemini_key_manager.skipped_keys]
-                if not valid_keys:
-                    logger.warning("所有API密钥都已因失败次数过多而被跳过，停止处理剩余文件")
-                    remaining_count = total_files - (i + 1)
-                    if remaining_count > 0:
-                        logger.info(f"还有 {remaining_count} 个文件未处理")
-                    
-                    # 将剩余的文件标记为失败
-                    for j in range(i + 1, len(file_paths)):
-                        failed_files[file_paths[j]] = 0
-                    
-                    break
+            if status:
+                success_count += 1
+            else:
+                failed_files[file_path] = 0
+                
+        except Exception as e:
+            logger.error(f"处理文件 {file_path} 时发生错误: {str(e)}")
+            failed_files[file_path] = 0
     
     return success_count, failed_files
 
-def process_files_concurrently(files_to_process: List[str], max_workers: int, force_regenerate=False, update_progress_func=None):
+def process_files_concurrently(files_to_process: List[str], max_workers: int, api_type: str = "gemini", force_regenerate=False, update_progress_func=None):
     """并发处理文件
     
-    使用线程池实现稳定的并发控制
-    
     Args:
-        files_to_process: 要处理的文件列表
-        max_workers: 最大并发数
+        files_to_process: 文件路径列表
+        max_workers: 最大工作线程数
+        api_type: API类型，gemini, openai 或 mixed
         force_regenerate: 是否强制重新生成
-        update_progress_func: 用于更新进度的回调函数，接收三个参数(current, total, status)
+        update_progress_func: 更新进度的回调函数
     
     Returns:
-        元组 (成功处理的文件数量, 失败的文件字典)
+        成功处理的文件数和失败的文件字典
     """
-    if not files_to_process:
-        return 0, {}
-    
-    # 初始化统计
+    global gemini_key_manager, openai_key_manager
     success_count = 0
     failed_files = {}
-    total_files = len(files_to_process)
     completed_count = 0
-    all_keys_skipped = False
+    total_files = len(files_to_process)
     
-    # 使用线程锁保护共享变量
+    # 线程锁，用于更新计数
     lock = threading.Lock()
+    
+    # 用于标记是否所有密钥都被跳过
+    all_gemini_keys_skipped = False
+    all_openai_keys_skipped = False
     keys_skipped_lock = threading.Lock()
     
-    # 处理完成事件，用于在所有密钥被跳过时提前结束
-    early_stop_event = threading.Event()
+    # 进度更新器线程
+    progress_stopped = threading.Event()
     
-    # 定义单个文件处理函数
+    # 定义文件处理函数
     def process_file(file_path, file_index):
-        nonlocal completed_count, success_count, all_keys_skipped
-        
-        # 检查是否应提前结束
-        if early_stop_event.is_set():
-            with lock:
-                failed_files[file_path] = 0  # 标记为未处理
-            return False
+        nonlocal success_count, completed_count, all_gemini_keys_skipped, all_openai_keys_skipped
         
         # 确保全局key_manager已初始化
-        global gemini_key_manager
-        if gemini_key_manager is None:
+        global gemini_key_manager, openai_key_manager
+        
+        # 初始化Gemini API密钥管理器（如果使用Gemini或混合模式）
+        if (api_type == "gemini" or api_type == "mixed") and gemini_key_manager is None:
             with keys_skipped_lock:
                 if gemini_key_manager is None:
-                    logger.warning("并发处理中检测到全局API密钥管理器未初始化，正在创建")
+                    logger.warning("并发处理中检测到全局Gemini API密钥管理器未初始化，正在创建")
                     gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
         
-        # 处理文件
+        # 初始化OpenAI API密钥管理器（如果使用OpenAI或混合模式）
+        if (api_type == "openai" or api_type == "mixed") and openai_key_manager is None:
+            with keys_skipped_lock:
+                if openai_key_manager is None:
+                    logger.warning("并发处理中检测到全局OpenAI API密钥管理器未初始化，正在创建")
+                    openai_key_manager = APIKeyManager(config.OPENAI_API_CONFIG, config.DEFAULT_MAX_RPM)
+        
+        # 检查是否要跳过处理
+        with keys_skipped_lock:
+            if api_type == "gemini" and all_gemini_keys_skipped:
+                return False
+            elif api_type == "openai" and all_openai_keys_skipped:
+                return False
+            elif api_type == "mixed" and all_gemini_keys_skipped and all_openai_keys_skipped:
+                return False
+        
         try:
-            result = process_single_file(
+            # 如果是混合模式，根据文件索引选择不同的API
+            current_api_type = api_type
+            if api_type == "mixed":
+                # 检查是否有一种API的密钥已全部跳过
+                with keys_skipped_lock:
+                    if all_gemini_keys_skipped and not all_openai_keys_skipped:
+                        current_api_type = "openai"
+                    elif all_openai_keys_skipped and not all_gemini_keys_skipped:
+                        current_api_type = "gemini"
+                    else:
+                        # 使用文件索引的奇偶性来分配API，偶数使用Gemini，奇数使用OpenAI
+                        current_api_type = "gemini" if file_index % 2 == 0 else "openai"
+                
+                logger.info(f"混合模式: 文件 {os.path.basename(file_path)} 使用 {current_api_type.upper()} API")
+            
+            # 处理单个文件
+            status = process_single_file(
                 file_path, 
+                api_type=current_api_type,
                 file_index=file_index, 
                 total_files=total_files,
                 force_regenerate=force_regenerate
             )
             
-            # 检查是否因为所有密钥都被跳过而失败
-            if result is False and gemini_key_manager and hasattr(gemini_key_manager, 'skipped_keys'):
-                with keys_skipped_lock:
-                    valid_keys = [conf['key'] for conf in gemini_key_manager.api_configs 
-                                  if conf['key'] not in gemini_key_manager.skipped_keys]
-                    if not valid_keys:
-                        all_keys_skipped = True
-                        early_stop_event.set()
-                        logger.warning("所有API密钥都已因失败次数过多而被跳过，停止处理剩余文件")
-                        return False
-            
+            # 更新计数
             with lock:
                 completed_count += 1
-                if result:
+                if status:
                     success_count += 1
                 else:
-                    failed_files[file_path] = 1  # 记录失败
-            
-            # 更新进度
-            if update_progress_func:
-                update_progress_func(completed_count, total_files, f"正在处理 {completed_count}/{total_files}")
-            
-            if completed_count % 5 == 0 or completed_count == total_files:
-                progress = (completed_count / total_files) * 100
-                logger.info(f"进度: {progress:.1f}% ({completed_count}/{total_files})")
+                    failed_files[file_path] = 0
                 
-            return result
+                # 更新进度
+                if update_progress_func:
+                    if api_type == "mixed":
+                        update_progress_func(completed_count, total_files, f"使用{current_api_type.upper()}")
+                    else:
+                        update_progress_func(completed_count, total_files)
+                    
+            # 检查Gemini API密钥状态（如果使用Gemini或混合模式）
+            if (current_api_type == "gemini" or api_type == "mixed") and gemini_key_manager and hasattr(gemini_key_manager, 'skipped_keys'):
+                valid_keys = [conf['key'] for conf in gemini_key_manager.api_configs 
+                              if conf['key'] not in gemini_key_manager.skipped_keys]
+                if not valid_keys:
+                    with keys_skipped_lock:
+                        all_gemini_keys_skipped = True
+                        logger.warning("所有Gemini API密钥都已因失败次数过多而被跳过")
+                        
+                        # 如果是混合模式，检查是否需要停止处理
+                        if api_type == "mixed" and all_openai_keys_skipped:
+                            logger.warning("所有API密钥都已因失败次数过多而被跳过，停止剩余处理")
+                        elif api_type == "gemini":
+                            logger.warning("所有Gemini API密钥都已被跳过，停止剩余处理")
             
-        except Exception as exc:
-            logger.error(f"处理文件 {file_path} 时发生异常: {exc}")
+            # 检查OpenAI API密钥状态（如果使用OpenAI或混合模式）
+            if (current_api_type == "openai" or api_type == "mixed") and openai_key_manager and hasattr(openai_key_manager, 'skipped_keys'):
+                valid_keys = [conf['key'] for conf in openai_key_manager.api_configs 
+                              if conf['key'] not in openai_key_manager.skipped_keys]
+                if not valid_keys:
+                    with keys_skipped_lock:
+                        all_openai_keys_skipped = True
+                        logger.warning("所有OpenAI API密钥都已因失败次数过多而被跳过")
+                        
+                        # 如果是混合模式，检查是否需要停止处理
+                        if api_type == "mixed" and all_gemini_keys_skipped:
+                            logger.warning("所有API密钥都已因失败次数过多而被跳过，停止剩余处理")
+                        elif api_type == "openai":
+                            logger.warning("所有OpenAI API密钥都已被跳过，停止剩余处理")
+            
+            return status
+        except Exception as e:
+            logger.error(f"处理文件 {file_path} 时发生错误: {str(e)}")
+            
+            # 更新计数
             with lock:
                 completed_count += 1
-                failed_files[file_path] = 1
+                failed_files[file_path] = 0
+                
+                # 更新进度
+                if update_progress_func:
+                    update_progress_func(completed_count, total_files)
+                    
             return False
     
     # 使用tqdm显示进度条
@@ -487,7 +565,7 @@ def process_files_concurrently(files_to_process: List[str], max_workers: int, fo
                     pbar.refresh()
                     
                     # 检查是否需要提前结束
-                    if early_stop_event.is_set():
+                    if progress_stopped.is_set():
                         # 尝试取消剩余任务（注意：已开始执行的任务无法取消）
                         for f in futures:
                             if not f.done():
@@ -502,8 +580,16 @@ def process_files_concurrently(files_to_process: List[str], max_workers: int, fo
                     failed_files[file_path] = 0
     
     # 检查是否因所有密钥都被跳过而提前结束
-    if all_keys_skipped:
-        logger.warning("脱水过程已终止: 所有API密钥都因失败次数过多而被跳过")
+    all_api_keys_skipped = False
+    if api_type == "gemini" and all_gemini_keys_skipped:
+        all_api_keys_skipped = True
+    elif api_type == "openai" and all_openai_keys_skipped:
+        all_api_keys_skipped = True
+    elif api_type == "mixed" and all_gemini_keys_skipped and all_openai_keys_skipped:
+        all_api_keys_skipped = True
+        
+    if all_api_keys_skipped:
+        logger.warning("脱水过程已终止: 所有可用API密钥都因失败次数过多而被跳过")
         # 将剩余未处理的文件标记为失败
         with lock:
             for i, file_path in enumerate(files_to_process):
@@ -515,51 +601,116 @@ def process_files_concurrently(files_to_process: List[str], max_workers: int, fo
     
     return success_count, failed_files
 
-def check_api_keys() -> None:
-    """检查API密钥是否有效"""
+def check_api_keys(api_type="gemini") -> None:
+    """检查API密钥是否有效
+    
+    Args:
+        api_type: API类型，"gemini"、"openai"或"mixed"
+    """
     # 加载配置
     loaded = config.load_api_config()
     if not loaded:
         logger.error("无法加载API密钥配置")
         return
     
-    if not config.GEMINI_API_CONFIG:
-        logger.error("未找到有效的Gemini API配置")
-        return
+    valid_gemini_key = None
+    valid_openai_key = None
     
-    # 测试每个密钥
-    logger.info(f"开始测试 {len(config.GEMINI_API_CONFIG)} 个API密钥...")
+    # 检查Gemini API密钥（如果是gemini或mixed模式）
+    if api_type == "gemini" or api_type == "mixed":
+        if not config.GEMINI_API_CONFIG:
+            logger.error("未找到有效的Gemini API配置")
+            if api_type == "gemini":
+                return
+        else:
+            # 测试每个密钥
+            logger.info(f"开始测试 {len(config.GEMINI_API_CONFIG)} 个Gemini API密钥...")
+            
+            # 简单测试文本
+            test_content = "这是一个测试。请将这句话压缩一下。"
+            
+            for i, key_config in enumerate(config.GEMINI_API_CONFIG):
+                key_id = key_config.get('key', '未指定')
+                # 仅显示密钥的前8位，保护隐私
+                masked_key = key_id[:8] + "..." if len(key_id) > 8 else key_id
+                
+                logger.info(f"测试Gemini密钥 {i+1}/{len(config.GEMINI_API_CONFIG)}: {masked_key}")
+                
+                try:
+                    # 尝试使用这个密钥进行简单请求
+                    result = condense_novel_gemini(test_content, key_config, gemini_key_manager)
+                    if result:
+                        logger.info(f"✓ Gemini密钥 {masked_key} 有效")
+                        logger.info(f"  返回结果: {result}")
+                        # 记录有效密钥
+                        valid_gemini_key = key_config
+                        # 如果只是测试Gemini，直接返回
+                        if api_type == "gemini":
+                            return valid_gemini_key
+                        # 如果是混合模式，继续测试OpenAI
+                        break
+                    else:
+                        logger.error(f"✗ Gemini密钥 {masked_key} 无法获取有效响应")
+                except Exception as e:
+                    logger.error(f"✗ Gemini密钥 {masked_key} 测试失败: {e}")
     
-    # 简单测试文本
-    test_content = "这是一个测试。请将这句话压缩一下。"
+    # 检查OpenAI API密钥（如果是openai或mixed模式）
+    if api_type == "openai" or api_type == "mixed":
+        if not config.OPENAI_API_CONFIG:
+            logger.error("未找到有效的OpenAI API配置")
+            if api_type == "openai":
+                return
+        else:
+            # 测试每个密钥
+            logger.info(f"开始测试 {len(config.OPENAI_API_CONFIG)} 个OpenAI API密钥...")
+            
+            # 简单测试文本
+            test_content = "这是一个测试。请将这句话压缩一下。"
+            
+            for i, key_config in enumerate(config.OPENAI_API_CONFIG):
+                key_id = key_config.get('key', '未指定')
+                # 仅显示密钥的前8位，保护隐私
+                masked_key = key_id[:8] + "..." if len(key_id) > 8 else key_id
+                
+                logger.info(f"测试OpenAI密钥 {i+1}/{len(config.OPENAI_API_CONFIG)}: {masked_key}")
+                
+                try:
+                    # 尝试使用这个密钥进行简单请求
+                    result = condense_novel_openai(test_content, key_config, openai_key_manager)
+                    if result:
+                        logger.info(f"✓ OpenAI密钥 {masked_key} 有效")
+                        logger.info(f"  返回结果: {result}")
+                        # 记录有效密钥
+                        valid_openai_key = key_config
+                        # 如果只是测试OpenAI，直接返回
+                        if api_type == "openai":
+                            return valid_openai_key
+                        # 如果是混合模式，已经测试完成
+                        break
+                    else:
+                        logger.error(f"✗ OpenAI密钥 {masked_key} 无法获取有效响应")
+                except Exception as e:
+                    logger.error(f"✗ OpenAI密钥 {masked_key} 测试失败: {e}")
     
-    for i, key_config in enumerate(config.GEMINI_API_CONFIG):
-        key_id = key_config.get('key', '未指定')
-        # 仅显示密钥的前8位，保护隐私
-        masked_key = key_id[:8] + "..." if len(key_id) > 8 else key_id
-        
-        logger.info(f"测试密钥 {i+1}/{len(config.GEMINI_API_CONFIG)}: {masked_key}")
-        
-        try:
-            # 尝试使用这个密钥进行简单请求
-            result = condense_novel_gemini(test_content, key_config, gemini_key_manager)
-            if result:
-                logger.info(f"✓ 密钥 {masked_key} 有效")
-                logger.info(f"  返回结果: {result}")
-                # 报告成功
-                return key_config
-            else:
-                logger.error(f"✗ 密钥 {masked_key} 无法获取有效响应")
-        except Exception as e:
-            logger.error(f"✗ 密钥 {masked_key} 测试失败: {e}")
+    # 如果是混合模式，返回测试结果
+    if api_type == "mixed":
+        if valid_gemini_key and valid_openai_key:
+            logger.info("✓ 成功找到有效的Gemini和OpenAI API密钥，混合模式可用")
+            return (valid_gemini_key, valid_openai_key)
+        elif valid_gemini_key:
+            logger.warning("! 仅找到有效的Gemini API密钥，将只使用Gemini API")
+            return valid_gemini_key
+        elif valid_openai_key:
+            logger.warning("! 仅找到有效的OpenAI API密钥，将只使用OpenAI API")
+            return valid_openai_key
     
     # 未找到可用的API密钥
-    logger.error("未找到可用的API密钥")
+    logger.error(f"未找到可用的{api_type.capitalize()} API密钥")
     return None
 
 def main():
     """主函数：解析命令行参数并执行对应操作"""
-    global OUTPUT_DIR, gemini_key_manager
+    global OUTPUT_DIR, gemini_key_manager, openai_key_manager
     
     # 重置统计数据
     reset_statistics()
@@ -582,6 +733,8 @@ def main():
     config_group = parser.add_argument_group('配置选项')
     config_group.add_argument('-c', '--config', help=f'配置文件路径，默认为 {config.CONFIG_FILE_PATH}')
     config_group.add_argument('-k', '--key', help='直接指定Gemini API密钥（优先级高于配置文件）')
+    config_group.add_argument('--openai-key', help='直接指定OpenAI API密钥（优先级高于配置文件）')
+    config_group.add_argument('--api', choices=['gemini', 'openai', 'mixed'], default='mixed', help='选择使用的API类型，默认为混合模式')
     
     # 执行模式参数
     mode_group = parser.add_argument_group('执行模式')
@@ -610,8 +763,10 @@ def main():
         # 如果命令行提供了密钥，直接使用
         if args.key:
             config.GEMINI_API_CONFIG = [{"key": args.key}]
+        if args.openai_key:
+            config.OPENAI_API_CONFIG = [{"key": args.openai_key}]
             
-        check_api_keys()
+        check_api_keys(args.api)
         return
     
     # 加载配置
@@ -622,25 +777,76 @@ def main():
         config.GEMINI_API_CONFIG = [{"key": args.key}]
         config_loaded = True
     
-    # 检查API密钥
-    if not config_loaded or not config.GEMINI_API_CONFIG:
-        logger.error("未找到有效的Gemini API配置，请使用 --create-config 创建配置模板")
-        return
+    if args.openai_key:
+        config.OPENAI_API_CONFIG = [{"key": args.openai_key}]
+        config_loaded = True
     
-    # 创建密钥管理器
-    gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
-    max_concurrency = gemini_key_manager.get_max_concurrency()
+    # 根据选择的API类型检查密钥
+    api_type = args.api
     
-    # 输出API密钥和RPM信息
-    logger.info(f"共加载了 {len(config.GEMINI_API_CONFIG)} 个API密钥")
+    # 初始化变量
+    max_concurrency = 0
     
-    # 打印每个密钥的RPM值
-    for i, api_conf in enumerate(config.GEMINI_API_CONFIG):
-        key_id = api_conf.get('key', '未指定')
-        rpm = api_conf.get('rpm', config.DEFAULT_KEY_RPM)
-        # 仅显示密钥的前6位和后4位，保护隐私
-        masked_key = key_id[:6] + "..." + key_id[-4:] if len(key_id) > 10 else key_id
-        logger.info(f"  密钥 {i+1}: {masked_key}, RPM={rpm}")
+    if api_type == "gemini" or api_type == "mixed":
+        # 检查Gemini API密钥
+        if not config_loaded or not config.GEMINI_API_CONFIG:
+            logger.error("未找到有效的Gemini API配置，请使用 --create-config 创建配置模板")
+            if api_type == "gemini":
+                return
+            # 如果是混合模式，警告用户将只使用OpenAI
+            if api_type == "mixed":
+                logger.warning("未找到有效的Gemini API配置，混合模式将仅使用OpenAI API")
+        else:
+            # 创建Gemini密钥管理器
+            gemini_key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
+            gemini_concurrency = gemini_key_manager.get_max_concurrency()
+            max_concurrency = gemini_concurrency
+            
+            # 输出API密钥和RPM信息
+            logger.info(f"共加载了 {len(config.GEMINI_API_CONFIG)} 个Gemini API密钥")
+            
+            # 打印每个密钥的RPM值
+            for i, api_conf in enumerate(config.GEMINI_API_CONFIG):
+                key_id = api_conf.get('key', '未指定')
+                rpm = api_conf.get('rpm', config.DEFAULT_KEY_RPM)
+                # 仅显示密钥的前6位和后4位，保护隐私
+                masked_key = key_id[:6] + "..." + key_id[-4:] if len(key_id) > 10 else key_id
+                logger.info(f"  密钥 {i+1}: {masked_key}, RPM={rpm}")
+    
+    if api_type == "openai" or api_type == "mixed":
+        # 检查OpenAI API密钥
+        if not config_loaded or not config.OPENAI_API_CONFIG:
+            logger.error("未找到有效的OpenAI API配置，请使用 --create-config 创建配置模板")
+            if api_type == "openai":
+                return
+            # 如果是混合模式，警告用户将只使用Gemini
+            if api_type == "mixed" and gemini_key_manager is not None:
+                logger.warning("未找到有效的OpenAI API配置，混合模式将仅使用Gemini API")
+            elif api_type == "mixed":
+                logger.error("未找到有效的Gemini和OpenAI API配置，请先配置API密钥")
+                return
+        else:
+            # 创建OpenAI密钥管理器
+            openai_key_manager = APIKeyManager(config.OPENAI_API_CONFIG, config.DEFAULT_MAX_RPM)
+            openai_concurrency = openai_key_manager.get_max_concurrency()
+            
+            # 更新max_concurrency，如果是混合模式，取两者的总和
+            if api_type == "mixed" and gemini_key_manager is not None:
+                max_concurrency = gemini_concurrency + openai_concurrency
+                logger.info(f"混合模式并发上限: Gemini={gemini_concurrency}, OpenAI={openai_concurrency}, 总计={max_concurrency}")
+            else:
+                max_concurrency = openai_concurrency
+            
+            # 输出API密钥和RPM信息
+            logger.info(f"共加载了 {len(config.OPENAI_API_CONFIG)} 个OpenAI API密钥")
+            
+            # 打印每个密钥的RPM值
+            for i, api_conf in enumerate(config.OPENAI_API_CONFIG):
+                key_id = api_conf.get('key', '未指定')
+                rpm = api_conf.get('rpm', config.DEFAULT_KEY_RPM)
+                # 仅显示密钥的前6位和后4位，保护隐私
+                masked_key = key_id[:6] + "..." + key_id[-4:] if len(key_id) > 10 else key_id
+                logger.info(f"  密钥 {i+1}: {masked_key}, RPM={rpm}")
     
     # 确定最大工作线程数
     if args.max_workers:
@@ -654,7 +860,11 @@ def main():
         max_workers = max(1, max_workers)
         logger.info(f"使用API密钥管理器计算的安全并发值: {max_workers}")
     
-    logger.info(f"Gemini API密钥计算的并发上限: {max_concurrency}")
+    if api_type == "mixed":
+        logger.info(f"混合模式: 同时使用Gemini和OpenAI API，并发上限={max_concurrency}")
+    else:
+        logger.info(f"{api_type.capitalize()} API密钥计算的并发上限: {max_concurrency}")
+    
     logger.info(f"最终工作线程数设置为: {max_workers}")
     
     # 如果并发数为1，输出警告
@@ -768,24 +978,37 @@ def main():
     statistics["total_files"] = len(files_to_process)
     logger.info(f"找到 {len(files_to_process)} 个文件待处理")
     
-    # 根据参数选择顺序处理或并发处理
-    if args.sequential or max_workers < 1:
-        if args.sequential:
-            logger.info("使用顺序处理模式 (由命令行参数--sequential指定)")
-        else:
-            logger.info(f"使用顺序处理模式 (并发数max_workers={max_workers}小于1)")
+    # 选择处理模式
+    if args.test:
+        # 测试模式
+        logger.info("启用测试模式，只处理前5个文件")
+        if len(files_to_process) > 5:
+            files_to_process = files_to_process[:5]
             
+        # 使用顺序处理模式
         success_count, failed_files = process_files_sequentially(
             files_to_process, 
-            len(files_to_process),
-            args.force
+            len(files_to_process), 
+            api_type=args.api,
+            force_regenerate=args.force
+        )
+    elif args.sequential or max_workers == 1:
+        # 顺序处理模式
+        logger.info("使用顺序处理模式")
+        success_count, failed_files = process_files_sequentially(
+            files_to_process, 
+            len(files_to_process), 
+            api_type=args.api,
+            force_regenerate=args.force
         )
     else:
+        # 并发处理模式
         logger.info(f"使用并发处理模式，最大工作线程数: {max_workers}")
         success_count, failed_files = process_files_concurrently(
-            files_to_process,
-            max_workers,
-            args.force
+            files_to_process, 
+            max_workers, 
+            api_type=args.api,
+            force_regenerate=args.force
         )
     
     # 完成统计

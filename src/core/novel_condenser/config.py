@@ -75,6 +75,11 @@ DEFAULT_KEY_RPM = 5  # 每个密钥默认每分钟请求数
 DEFAULT_MAX_RPM = 20  # 默认全局最大每分钟请求数
 GEMINI_API_CONFIG = []  # 从配置文件加载，格式为 [{"key": "key1", "redirect_url": "url1", "model": "model1", "rpm": 5}, ...]
 
+# OpenAI API 默认设置
+DEFAULT_OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo"
+OPENAI_API_CONFIG = []  # 从配置文件加载，格式为 [{"key": "key1", "redirect_url": "url1", "model": "model1", "rpm": 5}, ...]
+
 # 脱水比例常量
 MIN_CONDENSATION_RATIO = 30  # 最小压缩比例（百分比）
 MAX_CONDENSATION_RATIO = 50  # 最大压缩比例（百分比）
@@ -93,13 +98,25 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
     Returns:
         bool: 配置加载是否成功
     """
-    global GEMINI_API_CONFIG, DEFAULT_MAX_RPM
+    global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
     
     # 首先尝试从项目全局配置加载
-    if project_config and hasattr(project_config, 'GEMINI_API_CONFIG'):
-        GEMINI_API_CONFIG = project_config.GEMINI_API_CONFIG
-        DEFAULT_MAX_RPM = project_config.DEFAULT_MAX_RPM
-        return True
+    if project_config:
+        # 加载Gemini API配置
+        if hasattr(project_config, 'GEMINI_API_CONFIG'):
+            GEMINI_API_CONFIG = project_config.GEMINI_API_CONFIG
+        
+        # 加载OpenAI API配置
+        if hasattr(project_config, 'OPENAI_API_CONFIG'):
+            OPENAI_API_CONFIG = project_config.OPENAI_API_CONFIG
+            
+        # 加载RPM配置
+        if hasattr(project_config, 'DEFAULT_MAX_RPM'):
+            DEFAULT_MAX_RPM = project_config.DEFAULT_MAX_RPM
+            
+        # 如果至少加载了一种API配置，则返回成功
+        if len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0:
+            return True
     
     # 如果指定了配置文件路径，直接使用
     if config_path:
@@ -124,7 +141,7 @@ def _load_from_file(file_path: str) -> bool:
     Returns:
         bool: 加载是否成功
     """
-    global GEMINI_API_CONFIG, DEFAULT_MAX_RPM
+    global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
     
     if not os.path.exists(file_path):
         logger.warning(f"配置文件不存在: {file_path}")
@@ -133,17 +150,25 @@ def _load_from_file(file_path: str) -> bool:
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
-            
+        
+        # 加载Gemini API配置    
         if 'gemini_api' in config_data and isinstance(config_data['gemini_api'], list):
             GEMINI_API_CONFIG = config_data['gemini_api']
-            
-            # 加载max_rpm值（如果存在）
-            if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
-                DEFAULT_MAX_RPM = config_data['max_rpm']
-                
-            logger.info(f"成功加载配置文件: {file_path}")
             logger.info(f"加载了 {len(GEMINI_API_CONFIG)} 个Gemini API密钥")
-            return len(GEMINI_API_CONFIG) > 0
+        
+        # 加载OpenAI API配置
+        if 'openai_api' in config_data and isinstance(config_data['openai_api'], list):
+            OPENAI_API_CONFIG = config_data['openai_api']
+            logger.info(f"加载了 {len(OPENAI_API_CONFIG)} 个OpenAI API密钥")
+            
+        # 加载max_rpm值（如果存在）
+        if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
+            DEFAULT_MAX_RPM = config_data['max_rpm']
+                
+        logger.info(f"成功加载配置文件: {file_path}")
+        
+        # 至少有一种API配置加载成功
+        return len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0
             
     except Exception as e:
         logger.error(f"加载配置文件失败: {e}")
@@ -183,6 +208,14 @@ def create_config_template(config_path: Optional[str] = None) -> None:
                     {
                         "key": "在此处填入您的Gemini API密钥2",
                         "rpm": 5
+                    }
+                ],
+                "openai_api": [
+                    {
+                        "key": "在此处填入您的OpenAI API密钥",
+                        "redirect_url": "https://api.openai.com/v1/chat/completions",
+                        "model": "gpt-3.5-turbo",
+                        "rpm": 10
                     }
                 ],
                 "max_rpm": 20
