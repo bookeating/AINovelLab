@@ -1,0 +1,53 @@
+api_keys.json
+# Python bytecode
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+logs/
+
+# Virtualenv
+venv/
+env/
+ENV/
+.env
+.venv
+
+# Build
+build/
+dist/
+__pycache__/
+*.egg-info/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 测试文件
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# EPUB 和其他文件格式（如需忽略）
+# *.epub
+# *.txt
+# *.pdf
+AINovelLab.spec
