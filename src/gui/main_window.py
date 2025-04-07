@@ -29,6 +29,7 @@ from .home_tab import HomeTab
 from .epub_splitter_tab import EpubSplitterTab
 from .condenser_tab import CondenserTab
 from .txt_to_epub_tab import TxtToEpubTab
+from .api_test_tab import ApiTestTab
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -51,17 +52,19 @@ class MainWindow(QMainWindow):
         # 创建标签页控件
         self.tabs = QTabWidget()
         
-        # 创建四个标签页
+        # 创建五个标签页
         self.home_tab = HomeTab()
         self.epub_splitter_tab = EpubSplitterTab()
         self.condenser_tab = CondenserTab()
         self.txt_to_epub_tab = TxtToEpubTab()
+        self.api_test_tab = ApiTestTab()
         
         # 添加标签页到标签页控件
         self.tabs.addTab(self.home_tab, "首页")
         self.tabs.addTab(self.epub_splitter_tab, "EPUB转TXT")
         self.tabs.addTab(self.condenser_tab, "脱水处理")
         self.tabs.addTab(self.txt_to_epub_tab, "TXT转EPUB")
+        self.tabs.addTab(self.api_test_tab, "API测试")
         
         # 设置中央控件
         self.setCentralWidget(self.tabs)
