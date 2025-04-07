@@ -209,6 +209,16 @@ class WorkerThread(QThread):
         force_regenerate = self.args.get('force_regenerate', False)  # 获取强制生成参数
         api_type = self.args.get('api_type', 'gemini')  # 获取API类型，默认为gemini
         
+        # 获取脱水比例参数
+        min_ratio = self.args.get('min_condensation_ratio', config.MIN_CONDENSATION_RATIO)
+        max_ratio = self.args.get('max_condensation_ratio', config.MAX_CONDENSATION_RATIO)
+        target_ratio = self.args.get('target_condensation_ratio', config.TARGET_CONDENSATION_RATIO)
+        
+        # 更新全局配置
+        config.MIN_CONDENSATION_RATIO = min_ratio
+        config.MAX_CONDENSATION_RATIO = max_ratio
+        config.TARGET_CONDENSATION_RATIO = target_ratio
+        
         print(f"选择脱水章节范围: {start_chapter} - {end_chapter}", flush=True)
         if output_dir:
             print(f"脱水输出目录: {output_dir}", flush=True)
@@ -217,6 +227,7 @@ class WorkerThread(QThread):
         
         print(f"强制生成模式: {'开启' if force_regenerate else '关闭'}", flush=True)
         print(f"API类型: {api_type}", flush=True)
+        print(f"脱水比例设置: 最小{min_ratio}% - 最大{max_ratio}% (目标{target_ratio}%)", flush=True)
         
         # 获取并显示并发数
         concurrency = 1

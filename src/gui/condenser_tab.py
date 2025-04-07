@@ -124,6 +124,52 @@ class CondenserTab(QWidget):
         self.api_type_combo.addItem("混合使用", "mixed")
         self.api_type_combo.setCurrentIndex(2)  # 默认选择混合模式
         
+        # 添加脱水比例设置
+        condensation_group = QGroupBox("脱水比例设置")
+        condensation_layout = QVBoxLayout()
+        
+        # 最小比例
+        min_ratio_layout = QHBoxLayout()
+        min_ratio_label = QLabel("最小脱水比例:")
+        self.min_ratio_spin = QSpinBox()
+        self.min_ratio_spin.setRange(10, 90)
+        self.min_ratio_spin.setValue(config.MIN_CONDENSATION_RATIO)
+        self.min_ratio_spin.setSuffix("%")
+        self.min_ratio_spin.setToolTip("设置脱水后文本相对于原文的最小比例")
+        self.min_ratio_spin.valueChanged.connect(self.update_min_ratio)
+        min_ratio_layout.addWidget(min_ratio_label)
+        min_ratio_layout.addWidget(self.min_ratio_spin)
+        
+        # 最大比例
+        max_ratio_layout = QHBoxLayout()
+        max_ratio_label = QLabel("最大脱水比例:")
+        self.max_ratio_spin = QSpinBox()
+        self.max_ratio_spin.setRange(20, 95)
+        self.max_ratio_spin.setValue(config.MAX_CONDENSATION_RATIO)
+        self.max_ratio_spin.setSuffix("%")
+        self.max_ratio_spin.setToolTip("设置脱水后文本相对于原文的最大比例")
+        self.max_ratio_spin.valueChanged.connect(self.update_max_ratio)
+        max_ratio_layout.addWidget(max_ratio_label)
+        max_ratio_layout.addWidget(self.max_ratio_spin)
+        
+        # 目标比例
+        target_ratio_layout = QHBoxLayout()
+        target_ratio_label = QLabel("目标脱水比例:")
+        self.target_ratio_spin = QSpinBox()
+        self.target_ratio_spin.setRange(15, 90)
+        self.target_ratio_spin.setValue(config.TARGET_CONDENSATION_RATIO)
+        self.target_ratio_spin.setSuffix("%")
+        self.target_ratio_spin.setToolTip("设置脱水后文本相对于原文的目标比例")
+        self.target_ratio_spin.valueChanged.connect(self.update_target_ratio)
+        target_ratio_layout.addWidget(target_ratio_label)
+        target_ratio_layout.addWidget(self.target_ratio_spin)
+        
+        # 添加到脱水比例布局
+        condensation_layout.addLayout(min_ratio_layout)
+        condensation_layout.addLayout(max_ratio_layout)
+        condensation_layout.addLayout(target_ratio_layout)
+        condensation_group.setLayout(condensation_layout)
+        
         # 不再显示API类型选择界面
         # api_type_layout = QHBoxLayout()
         # api_type_label = QLabel("API类型:")
@@ -169,6 +215,7 @@ class CondenserTab(QWidget):
         left_panel.addWidget(output_group)
         left_panel.addWidget(range_group)
         left_panel.addWidget(options_group)
+        left_panel.addWidget(condensation_group)  # 添加脱水比例设置
         left_panel.addWidget(status_group)
         left_panel.addWidget(files_group)
         left_panel.addLayout(button_layout)
@@ -413,7 +460,10 @@ class CondenserTab(QWidget):
             'end_chapter': self.end_chapter_spin.value(),
             'output_dir': self.output_dir,
             'force_regenerate': self.force_regenerate_checkbox.isChecked(),
-            'api_type': api_type  # 始终使用混合模式
+            'api_type': api_type,  # 始终使用混合模式
+            'min_condensation_ratio': self.min_ratio_spin.value(),
+            'max_condensation_ratio': self.max_ratio_spin.value(),
+            'target_condensation_ratio': self.target_ratio_spin.value()
         }
         
         # 创建并启动工作线程
@@ -432,6 +482,7 @@ class CondenserTab(QWidget):
         self.add_log(f"脱水输出目录: {self.output_dir}")
         self.add_log(f"强制生成模式: {'开启' if self.force_regenerate_checkbox.isChecked() else '关闭'}")
         self.add_log(f"API模式: 混合模式 (自动选择Gemini或OpenAI API)")
+        self.add_log(f"脱水比例设置: 最小{self.min_ratio_spin.value()}% - 最大{self.max_ratio_spin.value()}% (目标{self.target_ratio_spin.value()}%)")
         
         # API可用性信息
         if gemini_initialized and openai_initialized:
@@ -487,4 +538,36 @@ class CondenserTab(QWidget):
         if state == Qt.Checked:
             self.log_text.setLineWrapMode(QTextEdit.WidgetWidth)
         else:
-            self.log_text.setLineWrapMode(QTextEdit.NoWrap) 
+            self.log_text.setLineWrapMode(QTextEdit.NoWrap)
+    
+    def update_min_ratio(self, value):
+        """更新最小脱水比例"""
+        # 确保最小比例不大于最大比例
+        if value > self.max_ratio_spin.value():
+            self.max_ratio_spin.setValue(value)
+        # 确保目标比例不小于最小比例
+        if self.target_ratio_spin.value() < value:
+            self.target_ratio_spin.setValue(value)
+        # 更新配置
+        config.MIN_CONDENSATION_RATIO = value
+    
+    def update_max_ratio(self, value):
+        """更新最大脱水比例"""
+        # 确保最大比例不小于最小比例
+        if value < self.min_ratio_spin.value():
+            self.min_ratio_spin.setValue(value)
+        # 确保目标比例不大于最大比例
+        if self.target_ratio_spin.value() > value:
+            self.target_ratio_spin.setValue(value)
+        # 更新配置
+        config.MAX_CONDENSATION_RATIO = value
+    
+    def update_target_ratio(self, value):
+        """更新目标脱水比例"""
+        # 确保目标比例在最小和最大之间
+        if value < self.min_ratio_spin.value():
+            self.min_ratio_spin.setValue(value)
+        elif value > self.max_ratio_spin.value():
+            self.max_ratio_spin.setValue(value)
+        # 更新配置
+        config.TARGET_CONDENSATION_RATIO = value 

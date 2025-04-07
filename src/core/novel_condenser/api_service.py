@@ -198,7 +198,7 @@ def _process_content_with_gemini(content: str, api_key: str, redirect_url: str, 
     if is_chunk:
         prefix = f"这是一个小说的第{chunk_index}段，共{total_chunks}段。"
     
-    system_prompt = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的30%-50%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
+    system_prompt = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
     
     # 构建正确的API URL格式
     # 不同API服务商可能有不同的URL格式
@@ -586,7 +586,7 @@ def _process_content_with_openai(content: str, api_key: str, redirect_url: str, 
     if is_chunk:
         prefix = f"这是一个小说的第{chunk_index}段，共{total_chunks}段。"
     
-    system_message = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的30%-50%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
+    system_message = f"{prefix}你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{config.MIN_CONDENSATION_RATIO}%-{config.MAX_CONDENSATION_RATIO}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。"
     
     # 构建正确的API URL格式
     final_api_url = redirect_url or config.DEFAULT_OPENAI_API_URL

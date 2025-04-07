@@ -99,6 +99,7 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
         bool: 配置加载是否成功
     """
     global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
+    global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     
     # 首先尝试从项目全局配置加载
     if project_config:
@@ -113,6 +114,14 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
         # 加载RPM配置
         if hasattr(project_config, 'DEFAULT_MAX_RPM'):
             DEFAULT_MAX_RPM = project_config.DEFAULT_MAX_RPM
+            
+        # 加载脱水比例配置
+        if hasattr(project_config, 'MIN_CONDENSATION_RATIO'):
+            MIN_CONDENSATION_RATIO = project_config.MIN_CONDENSATION_RATIO
+        if hasattr(project_config, 'MAX_CONDENSATION_RATIO'):
+            MAX_CONDENSATION_RATIO = project_config.MAX_CONDENSATION_RATIO
+        if hasattr(project_config, 'TARGET_CONDENSATION_RATIO'):
+            TARGET_CONDENSATION_RATIO = project_config.TARGET_CONDENSATION_RATIO
             
         # 如果至少加载了一种API配置，则返回成功
         if len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0:
@@ -142,6 +151,7 @@ def _load_from_file(file_path: str) -> bool:
         bool: 加载是否成功
     """
     global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
+    global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
     
     if not os.path.exists(file_path):
         logger.warning(f"配置文件不存在: {file_path}")
@@ -164,6 +174,19 @@ def _load_from_file(file_path: str) -> bool:
         # 加载max_rpm值（如果存在）
         if 'max_rpm' in config_data and isinstance(config_data['max_rpm'], int):
             DEFAULT_MAX_RPM = config_data['max_rpm']
+            
+        # 加载脱水比例配置（如果存在）
+        if 'min_condensation_ratio' in config_data and isinstance(config_data['min_condensation_ratio'], int):
+            MIN_CONDENSATION_RATIO = config_data['min_condensation_ratio']
+            logger.info(f"加载了最小脱水比例: {MIN_CONDENSATION_RATIO}%")
+            
+        if 'max_condensation_ratio' in config_data and isinstance(config_data['max_condensation_ratio'], int):
+            MAX_CONDENSATION_RATIO = config_data['max_condensation_ratio']
+            logger.info(f"加载了最大脱水比例: {MAX_CONDENSATION_RATIO}%")
+            
+        if 'target_condensation_ratio' in config_data and isinstance(config_data['target_condensation_ratio'], int):
+            TARGET_CONDENSATION_RATIO = config_data['target_condensation_ratio']
+            logger.info(f"加载了目标脱水比例: {TARGET_CONDENSATION_RATIO}%")
                 
         logger.info(f"成功加载配置文件: {file_path}")
         
@@ -218,7 +241,10 @@ def create_config_template(config_path: Optional[str] = None) -> None:
                         "rpm": 10
                     }
                 ],
-                "max_rpm": 20
+                "max_rpm": 20,
+                "min_condensation_ratio": 30,
+                "max_condensation_ratio": 50,
+                "target_condensation_ratio": 40
             }
             
             # 确保目录存在

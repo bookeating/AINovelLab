@@ -59,12 +59,21 @@
       "rpm": 3
     }
   ],
-  "max_rpm": 20,
-  "preferred_api": "gemini"
+  "max_rpm": 20
 }
 ```
 
 > **详细API配置指南**：请参阅[API配置详细说明](doc/API_CONFIG.md)
+
+## 脱水配置参数说明
+
+本工具支持自定义脱水（压缩）比例参数：
+
+- `min_condensation_ratio`: 最小压缩比例（百分比），默认为30%
+- `max_condensation_ratio`: 最大压缩比例（百分比），默认为50%
+- `target_condensation_ratio`: 目标压缩比例（百分比），默认为40%
+
+通过调整这些参数，您可以控制小说脱水后的内容长度。较低的比例将产生更简洁的结果，较高的比例将保留更多原文内容。
 
 ## 优化提示
 
