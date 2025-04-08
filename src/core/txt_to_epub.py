@@ -12,6 +12,9 @@ import re
 import argparse
 import logging
 import uuid  # 添加uuid模块导入
+import zipfile
+import shutil
+import tempfile
 from pathlib import Path
 from ebooklib import epub
 from bs4 import BeautifulSoup
@@ -80,16 +83,16 @@ def parse_filename(filename):
 
 
 def read_txt_content(file_path):
-    """
-    读取txt文件内容，自动处理编码问题
-    
-    Args:
-        file_path: 文件路径对象或字符串
-        
-    Returns:
-        str: 文件内容，读取失败则返回空字符串
-    """
+    """读取txt文件内容，自动处理编码问题"""
     file_path = Path(file_path)
+    
+    if not file_path.exists():
+        logger.error(f"文件不存在: {file_path}")
+        return "（文件不存在）"
+    
+    if file_path.stat().st_size == 0:
+        logger.warning(f"警告：文件 {file_path} 为空文件")
+        return "（空文件）"
     
     # 尝试使用不同编码读取文件
     encodings = ['utf-8', 'gbk', 'gb2312', 'utf-16', 'latin-1']
@@ -99,13 +102,34 @@ def read_txt_content(file_path):
             logger.debug(f"尝试使用 {encoding} 编码读取文件 {file_path.name}")
             with open(file_path, 'r', encoding=encoding) as f:
                 content = f.read()
-                logger.debug(f"文件 {file_path.name} 使用 {encoding} 编码成功读取")
+                # 检查是否成功读取到内容
+                if not content:
+                    logger.warning(f"文件 {file_path.name} 内容为空")
+                    continue
+                
+                logger.debug(f"文件 {file_path.name} 使用 {encoding} 编码成功读取，内容长度: {len(content)}")
                 return content
         except UnicodeDecodeError:
+            logger.debug(f"使用 {encoding} 编码读取 {file_path.name} 失败")
+            continue
+        except Exception as e:
+            logger.warning(f"读取文件 {file_path.name} 时发生错误: {e}")
             continue
     
-    logger.warning(f"警告：无法解码文件 {file_path}，将跳过该文件")
-    return ""
+    # 所有编码都失败时，尝试二进制读取
+    try:
+        logger.warning(f"所有文本编码都失败，尝试二进制读取文件 {file_path}")
+        with open(file_path, 'rb') as f:
+            binary_data = f.read()
+            # 尝试使用latin-1强制解码，这通常可以读取任何二进制数据
+            content = binary_data.decode('latin-1', errors='replace')
+            logger.info(f"使用二进制方式成功读取文件 {file_path.name}，内容长度: {len(content)}")
+            return content
+    except Exception as e:
+        logger.error(f"二进制读取文件 {file_path} 失败: {e}")
+    
+    logger.error(f"无法以任何方式解码文件 {file_path}，将返回默认内容")
+    return "（内容读取失败）"
 
 
 def create_chapter_html(chapter_title, content):
@@ -271,37 +295,53 @@ def create_epub_book(novel_name, chapters, author=None, language='zh-CN'):
 
 
 def add_chapters_to_book(book, chapters, epub_chapters, toc, spine):
-    """
-    将章节添加到EPUB书籍
-    
-    Args:
-        book: EPUB书籍对象
-        chapters: 章节信息列表
-        epub_chapters: EPUB章节对象列表
-        toc: 目录列表
-        spine: 书脊列表
-        
-    Returns:
-        int: 成功添加的章节数
-    """
+    """将章节添加到EPUB书籍"""
     added_chapters = 0
     
     if not chapters:
         logger.error("没有章节可添加")
         return 0
     
-    # 添加默认CSS样式
-    default_css = epub.EpubItem(
-        uid="style_default",
-        file_name="style/default.css",
-        media_type="text/css",
-        content="""
-        body { font-family: serif; }
-        h1 { text-align: center; margin: 1em 0; }
-        p { text-indent: 2em; margin: 0.5em 0; line-height: 1.5; }
-        """
-    )
-    book.add_item(default_css)
+    # 添加CSS
+    style = '''
+    @namespace epub "http://www.idpf.org/2007/ops";
+    body { 
+        font-family: "Noto Serif CJK SC", "Source Han Serif CN", SimSun, serif; 
+        margin: 5%; 
+        line-height: 1.5;
+    }
+    h1 { 
+        text-align: center;
+        font-size: 1.5em;
+        margin: 1em 0;
+    }
+    h2 { 
+        text-align: center;
+        font-size: 1.2em;
+        margin: 0.8em 0;
+    }
+    p { 
+        text-indent: 2em; 
+        margin: 0.3em 0;
+    }
+    .cover {
+        text-align: center;
+        margin: 3em 0;
+    }
+    .author {
+        text-align: center;
+        margin: 1em 0;
+    }
+    .toc a {
+        text-decoration: none;
+        color: black;
+    }
+    '''
+    css = epub.EpubItem(uid="style", 
+                       file_name="style.css", 
+                       media_type="text/css", 
+                       content=style)
+    book.add_item(css)
     
     # 添加封面页
     book_title = book.title
@@ -310,118 +350,126 @@ def add_chapters_to_book(book, chapters, epub_chapters, toc, spine):
         if book.metadata['creator']:
             book_author = book.metadata['creator'][0][0]
     
-    cover_html = f'''<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN">
+    cover_title = f'<h1 class="cover">{book_title}</h1>'
+    cover_author = f'<p class="author">作者：{book_author}</p>'
+    
+    cover = epub.EpubHtml(title='封面', 
+                         file_name='cover.xhtml',
+                         lang=language)
+    cover.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head>
-  <title>封面</title>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-  <style type="text/css">
-    body {{ margin: 0; padding: 0; text-align: center; }}
-    .cover {{ margin: 0 auto; padding: 1em; max-width: 100%; }}
-    h1 {{ font-size: 2em; margin: 1em 0; }}
-    .author {{ font-size: 1.2em; margin: 1em 0; }}
-  </style>
+    <title>封面</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 </head>
 <body>
-  <div class="cover">
-    <h1>{book_title}</h1>
-    <p class="author">{book_author}</p>
-  </div>
+    <div class="cover">
+        {cover_title}
+        {cover_author}
+    </div>
 </body>
 </html>'''
-    
-    cover = epub.EpubHtml(
-        title='封面',
-        file_name='cover.xhtml',
-        lang='zh-CN',
-        content=cover_html
-    )
     book.add_item(cover)
-    epub_chapters.append(cover)
-    toc.append(epub.Link('cover.xhtml', '封面', 'cover'))
-    spine.append(cover)
+    # 添加CSS引用
+    cover.add_link(href="style.css", rel="stylesheet", type="text/css")
     
-    # 创建目录页
-    toc_html = f'''<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="zh-CN">
+    # 添加目录页
+    toc_content = '<h1>目录</h1>\n<div class="toc">'
+    for i, chapter in enumerate(chapters):
+        safe_title = chapter["title"].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+        chapter_num = i + 1
+        toc_content += f'<p><a href="chapter_{chapter_num}.xhtml">{safe_title}</a></p>\n'
+    toc_content += '</div>'
+    
+    toc_page = epub.EpubHtml(title='目录',
+                            file_name='toc.xhtml',
+                            lang=language)
+    toc_page.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head>
-  <title>目录</title>
-  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-  <style type="text/css">
-    body {{ margin: 1em; padding: 0; }}
-    h1 {{ text-align: center; margin: 1em 0; }}
-    .toc {{ margin: 1em 0; }}
-    .toc a {{ text-decoration: none; color: #333; }}
-    .toc a:hover {{ text-decoration: underline; }}
-  </style>
+    <title>目录</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 </head>
 <body>
-  <h1>目录</h1>
-  <div class="toc">
-'''
-    
-    for i, chapter in enumerate(chapters):
-        # 转义特殊字符
-        safe_title = chapter["title"].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-        toc_html += f'    <p><a href="chapter_{chapter["number"]}.xhtml">{safe_title}</a></p>\n'
-    
-    toc_html += '''  </div>
+    {toc_content}
 </body>
 </html>'''
-    
-    toc_page = epub.EpubHtml(
-        title='目录',
-        file_name='toc.xhtml',
-        lang='zh-CN',
-        content=toc_html
-    )
     book.add_item(toc_page)
-    epub_chapters.append(toc_page)
-    toc.append(epub.Link('toc.xhtml', '目录', 'toc'))
-    spine.append(toc_page)
+    # 添加CSS引用
+    toc_page.add_link(href="style.css", rel="stylesheet", type="text/css")
     
-    # 添加常规章节
-    for chapter in chapters:
+    # 添加章节
+    for i, chapter in enumerate(chapters):
         try:
-            # 读取章节内容
             content = read_txt_content(chapter['path'])
+            logger.info(f"读取章节 {i+1} 内容，长度: {len(content) if content else 0} 字节")
+            
             if not content or not content.strip():
-                logger.warning(f"章节 {chapter['title']} 内容为空，将添加默认内容")
-                content = f"(此章节内容为空)"
+                logger.warning(f"章节 {i+1} 内容为空，使用默认文本")
+                content = f"（《{chapter['title']}》章节内容为空）"
             
-            # 创建epub章节
-            chapter_id = f"chapter_{chapter['number']}"
-            file_name = f"{chapter_id}.xhtml"
+            # 转义内容，确保安全
+            safe_title = chapter['title'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
             
-            # 设置章节内容
-            html_content = create_chapter_html(chapter['title'], content)
+            # 构建段落HTML
+            paragraphs_html = ""
+            for p in content.split('\n'):
+                if p.strip():
+                    p_safe = p.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+                    paragraphs_html += f'<p>{p_safe}</p>\n'
             
-            # 创建章节对象
-            epub_chapter = epub.EpubHtml(
-                title=chapter['title'],
+            # 确保章节内容不为空
+            if not paragraphs_html.strip():
+                logger.warning(f"章节 {i+1} 格式化后内容为空，使用默认文本")
+                paragraphs_html = f"<p>（《{safe_title}》章节内容为空）</p>"
+            
+            # 创建章节
+            chapter_id = f'chapter_{i+1}'
+            file_name = f'{chapter_id}.xhtml'
+            
+            c = epub.EpubHtml(
+                uid=chapter_id,
+                title=safe_title, 
                 file_name=file_name,
-                content=html_content,
-                lang='zh-CN'
+                lang=language
             )
             
-            # 不在这里添加CSS引用，避免可能的问题
-            # epub_chapter.add_item(default_css)
+            # 使用更简单的HTML结构
+            c.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>{safe_title}</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body>
+    <h1>{safe_title}</h1>
+    {paragraphs_html}
+</body>
+</html>'''
+            
+            # 验证内容长度
+            if len(c.content) < 100:
+                logger.warning(f"章节 {i+1} 生成的HTML内容过短: {len(c.content)}字节")
+            
+            # 添加对CSS的引用
+            c.add_link(href="style.css", rel="stylesheet", type="text/css")
             
             # 添加到书籍
-            book.add_item(epub_chapter)
-            epub_chapters.append(epub_chapter)
-            toc.append(epub.Link(file_name, chapter['title'], chapter_id))
-            spine.append(epub_chapter)
-            
+            book.add_item(c)
+            epub_chapters.append(c)
             added_chapters += 1
-            logger.debug(f"已添加章节 {chapter['number']}: {chapter['title']}")
             
+            logger.info(f"已添加章节 {i+1}: {safe_title} (HTML内容长度: {len(c.content)})")
         except Exception as e:
-            logger.error(f"添加章节 {chapter['title']} 时出错: {e}")
+            logger.error(f"添加章节 {i+1} 时出错: {e}")
             import traceback
-            logger.debug(f"详细错误: {traceback.format_exc()}")
+            logger.error(traceback.format_exc())
     
     # 确保至少添加了一个章节
     if added_chapters == 0:
@@ -433,72 +481,36 @@ def add_chapters_to_book(book, chapters, epub_chapters, toc, spine):
 
 
 def finalize_epub(book, toc, spine):
-    """
-    完成EPUB书籍的导航和目录设置
-    
-    Args:
-        book: EPUB书籍对象
-        toc: 目录列表
-        spine: 书脊列表
-    """
+    """完成EPUB书籍的导航和目录设置"""
     try:
-        # 添加导航文件
+        # 添加导航
         book.add_item(epub.EpubNcx())
         
-        # 创建自定义的导航内容
-        nav_content = '''<?xml version="1.0" encoding="utf-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="zh-CN" xml:lang="zh-CN">
-<head>
-  <title>导航</title>
-  <meta charset="utf-8" />
-</head>
-<body>
-  <nav id="toc" epub:type="toc">
-    <h1>目录</h1>
-    <ol>
-'''
-        
-        # 添加封面和目录
-        nav_content += '      <li><a href="cover.xhtml">封面</a></li>\n'
-        nav_content += '      <li><a href="toc.xhtml">目录</a></li>\n'
-        
-        # 添加各章节到导航
-        for item in book.spine:
-            if item == 'nav':
-                continue
-                
-            if hasattr(item, 'title') and hasattr(item, 'file_name'):
-                if not (item.file_name == 'cover.xhtml' or item.file_name == 'toc.xhtml'):
-                    # 转义特殊字符
-                    safe_title = item.title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-                    nav_content += f'      <li><a href="{item.file_name}">{safe_title}</a></li>\n'
-        
-        nav_content += '''    </ol>
-  </nav>
-</body>
-</html>'''
-        
-        # 创建自定义导航
-        nav = epub.EpubHtml(
-            uid='nav',
-            file_name='nav.xhtml',
-            title='导航',
-            content=nav_content
-        )
-        nav.add_link(href='style/default.css', rel='stylesheet', type='text/css')
-        nav.properties = ['nav']
+        # 创建导航文件
+        nav = epub.EpubNav()
+        nav.add_link(href="style.css", rel="stylesheet", type="text/css")
         book.add_item(nav)
         
-        # 确保spine中包含'nav'
-        if 'nav' not in spine:
-            spine.append('nav')
-        
-        # 设置书脊和目录
+        # 设置书籍脊柱（阅读顺序）确保正确顺序
+        spine = ['nav']
+        spine.append(cover)  # 添加封面
+        spine.append(toc_page)  # 添加目录
+        for chapter in epub_chapters:
+            spine.append(chapter)  # 添加每个章节
         book.spine = spine
-        book.toc = toc
         
-        # 添加额外的元数据
+        # 设置目录 - 使用扁平结构以确保兼容性
+        book.toc = [
+            epub.Link('cover.xhtml', '封面', 'cover'),
+            epub.Link('toc.xhtml', '目录', 'toc')
+        ]
+        
+        # 直接添加每个章节到目录，避免使用Section结构
+        for i, chapter in enumerate(epub_chapters):
+            chapter_num = i + 1
+            book.toc.append(epub.Link(f'chapter_{chapter_num}.xhtml', chapter.title, f'chapter_{chapter_num}'))
+        
+        # 添加元数据
         book.add_metadata('DC', 'description', '由TXT转EPUB工具生成')
         book.add_metadata('DC', 'publisher', 'AI小说实验室')
         book.add_metadata('DC', 'source', 'TXT文件转换')
@@ -516,16 +528,7 @@ def finalize_epub(book, toc, spine):
 
 
 def write_epub_file(book, output_path):
-    """
-    将EPUB书籍写入文件
-    
-    Args:
-        book: EPUB书籍对象
-        output_path: 输出文件路径
-        
-    Returns:
-        bool: 是否成功写入
-    """
+    """将EPUB书籍写入文件"""
     try:
         # 检查book对象是否有效
         if not book or not hasattr(book, 'spine') or not book.spine:
@@ -541,6 +544,46 @@ def write_epub_file(book, output_path):
         # 打印调试信息
         logger.info(f"EPUB书籍信息: 标题={book.title}, 章节数={len(content_items)}")
         
+        # 详细检查每个章节
+        chapter_count = 0
+        for item in book.items:
+            if isinstance(item, epub.EpubHtml) and 'chapter_' in item.file_name:
+                chapter_count += 1
+                content_length = len(item.content) if item.content else 0
+                logger.debug(f"章节文件 {item.file_name}: 标题={item.title}, 内容长度={content_length}")
+                
+                # 检查内容是否太短
+                if content_length < 100:
+                    logger.warning(f"章节 {item.title} 内容异常短: {content_length} 字节")
+                    # 添加默认内容
+                    safe_title = item.title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+                    item.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>{safe_title}</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body>
+    <h1>{safe_title}</h1>
+    <p>（本章内容为空或无法正常读取，请检查原始文件）</p>
+</body>
+</html>'''
+        
+        logger.info(f"EPUB包含 {chapter_count} 个章节文件")
+        
+        # 检查spine中的章节顺序
+        spine_chapters = [item for item in book.spine if isinstance(item, epub.EpubHtml) and 'chapter_' in item.file_name]
+        logger.info(f"Spine中包含 {len(spine_chapters)} 个章节")
+        logger.info(f"书脊顺序: {[getattr(item, 'file_name', item) for item in book.spine[:10]]}...")
+        
+        # 检查TOC和item是否对应
+        logger.info(f"目录项数: {len(book.toc)}")
+        toc_chapters = [item for item in book.toc if hasattr(item, 'href') and 'chapter_' in item.href]
+        logger.info(f"TOC中包含 {len(toc_chapters)} 个章节链接")
+        
+        # 确保输出目录存在
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -556,25 +599,334 @@ def write_epub_file(book, output_path):
         
         # 使用更兼容的选项
         options = {
-            'epub2_guide': True,  # 启用EPUB2指南
+            'epub2_guide': True,   # 启用EPUB2指南
             'epub3_landmark': False,  # 禁用EPUB3地标
-            'epub3_pages': False,  # 禁用EPUB3页面
+            'epub3_pages': False,   # 禁用EPUB3页面
             'landmark_title': 'Guide',  # 指南标题
-            'spine_direction': None  # 不设置脊柱方向
+            'spine_direction': None,  # 不设置脊柱方向
+            'play_order': {'enabled': True},  # 启用播放顺序
+            'toc_ncx': True,  # 启用toc.ncx文件生成
+            'version': 2  # 使用EPUB2格式以增加兼容性
         }
         
-        # 直接写入，不要使用复杂的捕获异常和备用策略
+        # 直接写入
         epub.write_epub(str(output_path), book, options)
         
-        # 验证文件是否成功写入且大小合理
-        if output_path.exists() and output_path.stat().st_size > 1000:  # 至少1KB
-            logger.info(f"已成功创建电子书：{output_path}")
+        # 验证文件
+        if output_path.exists():
+            file_size = output_path.stat().st_size
+            logger.info(f"EPUB文件已生成: {output_path}, 大小: {file_size/1024:.2f} KB")
+            
+            if file_size < 10000:  # 小于10KB可能有问题
+                logger.warning(f"生成的EPUB文件过小 ({file_size} 字节)，可能存在问题")
+                if file_size < 1000:  # 小于1KB几乎肯定有问题
+                    logger.error("文件太小，可能生成失败")
+                    return False
+            
+            # 成功
             return True
         else:
-            logger.error(f"生成的EPUB文件过小或不存在: {output_path}")
+            logger.error(f"生成的EPUB文件不存在: {output_path}")
             return False
     except Exception as e:
         logger.error(f"写入EPUB文件出错: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
+        return False
+
+
+def write_epub_file_manual(book, output_path):
+    """
+    使用zipfile库直接创建EPUB文件，绕过ebooklib的write_epub
+    
+    Args:
+        book: EpubBook对象
+        output_path: 输出文件路径
+    
+    Returns:
+        bool: 是否成功写入文件
+    """
+    try:
+        output_path = Path(output_path)
+        temp_dir = Path(tempfile.mkdtemp())
+        logger.info(f"创建临时目录: {temp_dir}")
+        
+        # 创建mimetype文件（必须是第一个文件，且不压缩）
+        mimetype_path = temp_dir / "mimetype"
+        with open(mimetype_path, "w", encoding="utf-8") as f:
+            f.write("application/epub+zip")
+        
+        # 创建META-INF目录
+        meta_inf_dir = temp_dir / "META-INF"
+        meta_inf_dir.mkdir(exist_ok=True)
+        
+        # 创建container.xml
+        container_path = meta_inf_dir / "container.xml"
+        with open(container_path, "w", encoding="utf-8") as f:
+            f.write('''<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+    <rootfiles>
+        <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+    </rootfiles>
+</container>''')
+        
+        # 创建OEBPS目录（存放内容）
+        oebps_dir = temp_dir / "OEBPS"
+        oebps_dir.mkdir(exist_ok=True)
+        
+        # 写入CSS文件
+        for item in book.items:
+            if isinstance(item, epub.EpubItem) and item.file_name.endswith('.css'):
+                css_path = oebps_dir / item.file_name
+                with open(css_path, "w", encoding="utf-8") as f:
+                    f.write(item.content)
+                logger.info(f"写入CSS文件: {item.file_name}")
+        
+        # 写入所有HTML文件（章节内容、封面、目录等）
+        for item in book.items:
+            if isinstance(item, epub.EpubHtml):
+                html_path = oebps_dir / item.file_name
+                with open(html_path, "w", encoding="utf-8") as f:
+                    # 验证内容是否为空
+                    if not item.content or len(item.content) < 10:
+                        logger.warning(f"文件 {item.file_name} 内容为空或过短，添加默认内容")
+                        # 添加默认内容
+                        safe_title = item.title.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+                        item.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>{safe_title}</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body>
+    <h1>{safe_title}</h1>
+    <p>（本章内容已丢失，请检查原始文件）</p>
+</body>
+</html>'''
+                    
+                    # 写入内容
+                    f.write(item.content)
+                    content_length = len(item.content)
+                    logger.info(f"写入HTML文件: {item.file_name}, 内容长度: {content_length}")
+        
+        # 写入导航文件
+        nav_items = [item for item in book.items if isinstance(item, epub.EpubNav)]
+        for nav in nav_items:
+            nav_path = oebps_dir / nav.file_name
+            with open(nav_path, "w", encoding="utf-8") as f:
+                f.write(nav.content)
+                logger.info(f"写入导航文件: {nav.file_name}")
+        
+        # 写入NCX文件
+        ncx_items = [item for item in book.items if isinstance(item, epub.EpubNcx)]
+        for ncx in ncx_items:
+            ncx_path = oebps_dir / "toc.ncx"
+            ncx_content = '''<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="unique-identifier"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+  <docTitle>
+    <text>''' + book.title + '''</text>
+  </docTitle>
+  <navMap>'''
+            
+            # 添加各章节导航点
+            for i, toc_item in enumerate(book.toc):
+                if hasattr(toc_item, 'href'):
+                    ncx_content += f'''
+    <navPoint id="navpoint-{i+1}" playOrder="{i+1}">
+      <navLabel>
+        <text>{toc_item.title}</text>
+      </navLabel>
+      <content src="{toc_item.href}"/>
+    </navPoint>'''
+            
+            ncx_content += '''
+  </navMap>
+</ncx>'''
+            
+            with open(ncx_path, "w", encoding="utf-8") as f:
+                f.write(ncx_content)
+                logger.info("写入TOC.NCX文件")
+        
+        # 创建OPF文件
+        opf_path = oebps_dir / "content.opf"
+        opf_content = '''<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>''' + book.title + '''</dc:title>'''
+        
+        # 添加作者
+        if hasattr(book, 'metadata') and 'creator' in book.metadata:
+            for creator in book.metadata['creator']:
+                opf_content += f'''
+    <dc:creator>{creator[0]}</dc:creator>'''
+        
+        # 添加语言
+        opf_content += f'''
+    <dc:language>{book.language}</dc:language>'''
+        
+        # 添加唯一标识符
+        unique_id = str(uuid.uuid4())
+        opf_content += f'''
+    <dc:identifier id="BookId">urn:uuid:{unique_id}</dc:identifier>'''
+        
+        # 添加其他元数据
+        if hasattr(book, 'metadata'):
+            if 'description' in book.metadata:
+                opf_content += f'''
+    <dc:description>{book.metadata['description'][0][0]}</dc:description>'''
+            if 'publisher' in book.metadata:
+                opf_content += f'''
+    <dc:publisher>{book.metadata['publisher'][0][0]}</dc:publisher>'''
+            if 'rights' in book.metadata:
+                opf_content += f'''
+    <dc:rights>{book.metadata['rights'][0][0]}</dc:rights>'''
+        
+        opf_content += '''
+  </metadata>
+  <manifest>'''
+        
+        # 添加所有文件到manifest
+        manifest_items = []
+        item_id = 1
+        
+        # 添加NCX
+        opf_content += '''
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'''
+        
+        # 添加样式表
+        for item in book.items:
+            if isinstance(item, epub.EpubItem) and item.file_name.endswith('.css'):
+                opf_content += f'''
+    <item id="style_{item_id}" href="{item.file_name}" media-type="text/css"/>'''
+                item_id += 1
+        
+        # 添加HTML文件
+        html_items = []
+        for item in book.items:
+            if isinstance(item, epub.EpubHtml):
+                item_id_str = item.id if hasattr(item, 'id') and item.id else f"item_{item_id}"
+                opf_content += f'''
+    <item id="{item_id_str}" href="{item.file_name}" media-type="application/xhtml+xml"/>'''
+                item_id += 1
+                html_items.append(item)
+        
+        # 添加导航文件
+        for item in book.items:
+            if isinstance(item, epub.EpubNav):
+                opf_content += f'''
+    <item id="nav" href="{item.file_name}" media-type="application/xhtml+xml" properties="nav"/>'''
+        
+        opf_content += '''
+  </manifest>
+  <spine toc="ncx">'''
+        
+        # 添加所有项目到spine，保持正确顺序
+        for item in book.spine:
+            if item == 'nav':
+                opf_content += '''
+    <itemref idref="nav"/>'''
+            elif isinstance(item, epub.EpubHtml):
+                item_id_str = item.id if hasattr(item, 'id') and item.id else "item_" + str(html_items.index(item) + 1)
+                opf_content += f'''
+    <itemref idref="{item_id_str}"/>'''
+        
+        opf_content += '''
+  </spine>
+  <guide>'''
+        
+        # 添加封面和目录到指南
+        for item in book.items:
+            if isinstance(item, epub.EpubHtml):
+                if 'cover' in item.file_name:
+                    opf_content += f'''
+    <reference type="cover" title="Cover" href="{item.file_name}"/>'''
+                elif 'toc' in item.file_name:
+                    opf_content += f'''
+    <reference type="toc" title="Table of Contents" href="{item.file_name}"/>'''
+        
+        opf_content += '''
+  </guide>
+</package>'''
+        
+        with open(opf_path, "w", encoding="utf-8") as f:
+            f.write(opf_content)
+            logger.info("写入OPF文件")
+        
+        # 创建EPUB文件（ZIP格式）
+        if output_path.exists():
+            output_path.unlink()
+        
+        logger.info(f"创建EPUB文件: {output_path}")
+        
+        epub_file = zipfile.ZipFile(output_path, 'w')
+        
+        # 首先添加mimetype文件，不压缩
+        epub_file.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
+        
+        # 添加其他所有文件，使用压缩
+        for root, dirs, files in os.walk(temp_dir):
+            for file in files:
+                if file != "mimetype":  # 跳过mimetype，因为已经添加了
+                    file_path = Path(root) / file
+                    arcname = str(file_path.relative_to(temp_dir))
+                    epub_file.write(file_path, arcname, compress_type=zipfile.ZIP_DEFLATED)
+                    logger.info(f"添加文件到EPUB: {arcname}")
+        
+        epub_file.close()
+        
+        # 清理临时目录
+        shutil.rmtree(temp_dir)
+        
+        # 验证生成的文件
+        if output_path.exists():
+            file_size = output_path.stat().st_size
+            logger.info(f"EPUB文件已生成: {output_path}, 大小: {file_size/1024:.2f} KB")
+            
+            if file_size < 10000:  # 小于10KB可能有问题
+                logger.warning(f"生成的EPUB文件过小 ({file_size} 字节)，可能存在问题")
+                if file_size < 1000:  # 小于1KB几乎肯定有问题
+                    logger.error("文件太小，可能生成失败")
+                    return False
+            
+            # 尝试打开ZIP文件验证其完整性
+            try:
+                with zipfile.ZipFile(output_path, 'r') as zf:
+                    # 检查基本文件是否存在
+                    required_files = ['mimetype', 'META-INF/container.xml', 'OEBPS/content.opf']
+                    for req_file in required_files:
+                        if req_file not in zf.namelist():
+                            logger.error(f"EPUB文件格式错误：缺少必要文件 {req_file}")
+                            return False
+                    
+                    # 检查章节文件
+                    chapter_files = [name for name in zf.namelist() if name.startswith('OEBPS/chapter_')]
+                    logger.info(f"EPUB中包含 {len(chapter_files)} 个章节文件")
+                    
+                    # 检查文件大小
+                    for chapter in chapter_files:
+                        info = zf.getinfo(chapter)
+                        logger.debug(f"章节文件 {chapter}: 压缩前大小={info.file_size}, 压缩后大小={info.compress_size}")
+                        if info.file_size == 0:
+                            logger.warning(f"章节文件 {chapter} 大小为零！")
+            except Exception as e:
+                logger.error(f"验证EPUB文件时出错: {e}")
+                return False
+            
+            logger.info("EPUB文件验证通过")
+            return True
+        else:
+            logger.error(f"生成的EPUB文件不存在: {output_path}")
+            return False
+    except Exception as e:
+        logger.error(f"手动创建EPUB文件时出错: {e}")
         import traceback
         logger.error(f"详细错误: {traceback.format_exc()}")
         return False
@@ -621,6 +973,8 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
             logger.error("未能提取任何有效章节")
             return None
         
+        logger.info(f"提取出 {len(chapters)} 个章节")
+        
         # 如果未指定输出路径，则使用小说名称作为文件名
         if not output_path:
             output_path = folder_path / f"{book_name}_脱水.epub"
@@ -637,6 +991,7 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         
         # 添加CSS
         style = '''
+        @namespace epub "http://www.idpf.org/2007/ops";
         body { 
             font-family: "Noto Serif CJK SC", "Source Han Serif CN", SimSun, serif; 
             margin: 5%; 
@@ -664,6 +1019,10 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
             text-align: center;
             margin: 1em 0;
         }
+        .toc a {
+            text-decoration: none;
+            color: black;
+        }
         '''
         css = epub.EpubItem(uid="style", 
                            file_name="style.css", 
@@ -678,96 +1037,167 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         cover = epub.EpubHtml(title='封面', 
                              file_name='cover.xhtml',
                              lang=language)
-        cover.content = f'''
-        <html>
-        <head>
-            <title>封面</title>
-            <link rel="stylesheet" href="style.css" type="text/css" />
-        </head>
-        <body>
-            <div class="cover">
-                {cover_title}
-                {cover_author}
-            </div>
-        </body>
-        </html>
-        '''
+        cover.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>封面</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body>
+    <div class="cover">
+        {cover_title}
+        {cover_author}
+    </div>
+</body>
+</html>'''
         book.add_item(cover)
+        # 添加CSS引用
+        cover.add_link(href="style.css", rel="stylesheet", type="text/css")
+        
+        logger.info("已添加封面页")
         
         # 添加目录页
         toc_content = '<h1>目录</h1>\n<div class="toc">'
         for i, chapter in enumerate(chapters):
             safe_title = chapter["title"].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-            toc_content += f'<p><a href="chapter_{i+1}.xhtml">{safe_title}</a></p>\n'
+            chapter_num = i + 1
+            toc_content += f'<p><a href="chapter_{chapter_num}.xhtml">{safe_title}</a></p>\n'
         toc_content += '</div>'
         
         toc_page = epub.EpubHtml(title='目录',
                                 file_name='toc.xhtml',
                                 lang=language)
-        toc_page.content = f'''
-        <html>
-        <head>
-            <title>目录</title>
-            <link rel="stylesheet" href="style.css" type="text/css" />
-        </head>
-        <body>
-            {toc_content}
-        </body>
-        </html>
-        '''
+        toc_page.content = f'''<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+    <title>目录</title>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+</head>
+<body>
+    {toc_content}
+</body>
+</html>'''
         book.add_item(toc_page)
+        # 添加CSS引用
+        toc_page.add_link(href="style.css", rel="stylesheet", type="text/css")
+        
+        logger.info("已添加目录页")
         
         # 添加章节
         epub_chapters = []
+        success_count = 0
+        error_count = 0
+        
         for i, chapter in enumerate(chapters):
-            content = read_txt_content(chapter['path'])
-            if not content.strip():
-                content = "(此章节内容为空)"
-            
-            # 转义内容，确保安全
-            safe_title = chapter['title'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-            
-            # 构建段落HTML
-            paragraphs_html = ""
-            for p in content.split('\n'):
-                if p.strip():
-                    p_safe = p.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
-                    paragraphs_html += f'<p>{p_safe}</p>\n'
-            
-            # 创建章节
-            c = epub.EpubHtml(title=safe_title, 
-                             file_name=f'chapter_{i+1}.xhtml',
-                             lang=language)
-            
-            c.content = f'''<?xml version="1.0" encoding="utf-8"?>
+            try:
+                content = read_txt_content(chapter['path'])
+                content_length = len(content) if content else 0
+                logger.info(f"读取章节 '{chapter['title']}' 内容，长度: {content_length} 字节")
+                
+                if not content or not content.strip():
+                    logger.warning(f"章节 '{chapter['title']}' 内容为空，使用默认文本")
+                    content = f"（《{chapter['title']}》章节内容为空）"
+                
+                # 转义内容，确保安全
+                safe_title = chapter['title'].replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+                
+                # 构建段落HTML
+                paragraphs_html = ""
+                for p in content.split('\n'):
+                    if p.strip():
+                        p_safe = p.strip().replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+                        paragraphs_html += f'<p>{p_safe}</p>\n'
+                
+                # 确保章节内容不为空
+                if not paragraphs_html.strip():
+                    logger.warning(f"章节 '{chapter['title']}' 格式化后内容为空，使用默认文本")
+                    paragraphs_html = f"<p>（《{safe_title}》章节内容为空）</p>"
+                
+                # 创建章节
+                chapter_id = f'chapter_{i+1}'
+                file_name = f'{chapter_id}.xhtml'
+                
+                c = epub.EpubHtml(
+                    uid=chapter_id,
+                    title=safe_title, 
+                    file_name=file_name,
+                    lang=language
+                )
+                
+                # 使用更简单的HTML结构
+                c.content = f'''<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="{language}">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head>
     <title>{safe_title}</title>
-    <link rel="stylesheet" href="style.css" type="text/css" />
-    <meta charset="utf-8" />
+    <link rel="stylesheet" type="text/css" href="style.css" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 </head>
 <body>
     <h1>{safe_title}</h1>
     {paragraphs_html}
 </body>
-</html>
-            '''
-            
-            book.add_item(c)
-            epub_chapters.append(c)
+</html>'''
+                
+                # 验证内容长度
+                if len(c.content) < 100:
+                    logger.warning(f"章节 '{chapter['title']}' 生成的HTML内容过短: {len(c.content)}字节")
+                
+                # 添加对CSS的引用
+                c.add_link(href="style.css", rel="stylesheet", type="text/css")
+                
+                # 添加到书籍
+                book.add_item(c)
+                epub_chapters.append(c)
+                success_count += 1
+                
+                logger.info(f"已添加章节 {i+1}/{len(chapters)}: {safe_title} (HTML内容长度: {len(c.content)})")
+            except Exception as e:
+                logger.error(f"添加章节 '{chapter['title']}' 时出错: {e}")
+                error_count += 1
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        logger.info(f"章节添加统计: 成功={success_count}, 失败={error_count}, 总计={len(chapters)}")
+        
+        if success_count == 0:
+            logger.error("没有成功添加任何章节，无法继续生成EPUB")
+            return None
         
         # 添加导航
         book.add_item(epub.EpubNcx())
+        
+        # 创建导航文件
         nav = epub.EpubNav()
+        nav.add_link(href="style.css", rel="stylesheet", type="text/css")
         book.add_item(nav)
         
-        # 设置书籍脊柱（阅读顺序）
-        book.spine = ['cover', 'nav', 'toc'] + [f'chapter_{i+1}' for i in range(len(epub_chapters))]
+        # 设置书籍脊柱（阅读顺序）确保正确顺序
+        spine = ['nav']
+        spine.append(cover)  # 添加封面
+        spine.append(toc_page)  # 添加目录
+        for chapter in epub_chapters:
+            spine.append(chapter)  # 添加每个章节
+        book.spine = spine
         
-        # 设置目录
-        book.toc = [epub.Section('封面', [cover]),
-                   epub.Section('目录', [toc_page])] + epub_chapters
+        logger.info(f"已设置spine，包含 {len(spine)} 个项目")
+        
+        # 设置目录 - 使用扁平结构以确保兼容性
+        book.toc = [
+            epub.Link('cover.xhtml', '封面', 'cover'),
+            epub.Link('toc.xhtml', '目录', 'toc')
+        ]
+        
+        # 直接添加每个章节到目录，避免使用Section结构
+        for i, chapter in enumerate(epub_chapters):
+            chapter_num = i + 1
+            book.toc.append(epub.Link(f'chapter_{chapter_num}.xhtml', chapter.title, f'chapter_{chapter_num}'))
+        
+        logger.info(f"已设置TOC，包含 {len(book.toc)} 个项目")
         
         # 添加元数据
         book.add_metadata('DC', 'description', f'{book_name} - 由AI小说实验室生成')
@@ -775,11 +1205,24 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         book.add_metadata('DC', 'rights', '版权归原作者所有')
         book.add_metadata('DC', 'identifier', f'uuid:{str(uuid.uuid4())}', {'id': 'unique-id'})
         
-        # 写入文件
-        if write_epub_file(book, output_path):
+        logger.info("已添加元数据")
+        
+        # 使用我们的新函数直接创建EPUB文件
+        logger.info("使用手动方式创建EPUB文件")
+        if write_epub_file_manual(book, output_path):
+            print(f"EPUB文件已成功生成: {output_path}")
             return str(output_path)
         else:
-            return None
+            logger.error("手动创建EPUB文件失败")
+            
+            # 失败后尝试使用ebooklib的方法作为备用
+            logger.info("尝试使用ebooklib作为备用方法")
+            if write_epub_file(book, output_path):
+                print(f"使用备用方法成功生成EPUB文件: {output_path}")
+                return str(output_path)
+            else:
+                logger.error("所有EPUB生成方法都失败")
+                return None
     except Exception as e:
         logger.error(f"合并TXT文件时出错: {e}")
         import traceback
