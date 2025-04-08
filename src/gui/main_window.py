@@ -13,7 +13,7 @@ from PyQt5.QtGui import QFont, QIcon, QColor, QPalette
 from ctypes import windll, c_int, byref, sizeof
 
 # 导入版本信息（添加更健壮的错误处理）
-VERSION_STRING = "AI小说实验室"  # 默认版本字符串，如果无法导入版本模块则使用此值
+VERSION_STRING = "AI小说工具"  # 默认版本字符串，如果无法导入版本模块则使用此值
 try:
     from ..version import get_version_string
     VERSION_STRING = get_version_string()

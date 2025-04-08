@@ -12,7 +12,7 @@ import platform
 def main():
     """主函数"""
     print("=" * 60)
-    print("AI小说实验室GUI临时打包脚本")
+    print("AI小说工具GUI临时打包脚本")
     print("=" * 60)
     
     # 获取项目根目录路径

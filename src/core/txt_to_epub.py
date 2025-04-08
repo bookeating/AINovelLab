@@ -512,7 +512,7 @@ def finalize_epub(book, toc, spine):
         
         # 添加元数据
         book.add_metadata('DC', 'description', '由TXT转EPUB工具生成')
-        book.add_metadata('DC', 'publisher', 'AI小说实验室')
+        book.add_metadata('DC', 'publisher', 'AI小说工具')
         book.add_metadata('DC', 'source', 'TXT文件转换')
         book.add_metadata('DC', 'rights', '版权归原作者所有')
         
@@ -1200,8 +1200,8 @@ def merge_txt_to_epub(folder_path, output_path=None, author=None, novel_name=Non
         logger.info(f"已设置TOC，包含 {len(book.toc)} 个项目")
         
         # 添加元数据
-        book.add_metadata('DC', 'description', f'{book_name} - 由AI小说实验室生成')
-        book.add_metadata('DC', 'publisher', 'AI小说实验室')
+        book.add_metadata('DC', 'description', f'{book_name} - 由AI小说工具生成')
+        book.add_metadata('DC', 'publisher', 'AI小说工具')
         book.add_metadata('DC', 'rights', '版权归原作者所有')
         book.add_metadata('DC', 'identifier', f'uuid:{str(uuid.uuid4())}', {'id': 'unique-id'})
         

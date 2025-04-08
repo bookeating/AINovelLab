@@ -1,4 +1,4 @@
-# AI小说实验室(AINovelLab)
+# AI小说工具(AINovelLab)
 
 这是一个用Python开发的小说处理工具套件，集成了以下功能：
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-AI小说实验室启动脚本
+AI小说工具启动脚本
 """
 
 import os

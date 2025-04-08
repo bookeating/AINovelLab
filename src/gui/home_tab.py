@@ -84,7 +84,7 @@ class HomeTab(QWidget):
         content_layout.setSpacing(24)
         
         # 添加标题
-        title_label = QLabel("AI小说实验室使用指南")
+        title_label = QLabel("AI小说工具使用指南")
         title_font = QFont()
         title_font.setPointSize(18)
         title_font.setBold(True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-AI小说实验室 - 包定义
+AI小说工具 - 包定义
 """ 

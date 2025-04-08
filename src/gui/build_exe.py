@@ -3,7 +3,7 @@
 """
 打包脚本 - 将GUI应用程序打包成Windows可执行文件(.exe)
 
-使用PyInstaller将AI小说实验室的GUI界面打包成可执行文件，
+使用PyInstaller将AI小说工具的GUI界面打包成可执行文件，
 便于在没有Python环境的Windows系统上直接运行。
 
 使用方法:
@@ -20,7 +20,7 @@ import platform
 def main():
     """主函数"""
     print("=" * 60)
-    print("AI小说实验室GUI打包脚本")
+    print("AI小说工具GUI打包脚本")
     print("=" * 60)
     
     # 获取项目根目录路径

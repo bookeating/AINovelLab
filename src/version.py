@@ -1,18 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-AI小说实验室 - 版本信息
+AI小说工具 - 版本信息
 """
 
 # 版本号格式：主版本号.次版本号.修订号
-VERSION = "0.0.3"
-VERSION_INFO = (0, 0, 3)  # 用于程序内部比较2
+VERSION = "0.0.4"
+VERSION_INFO = (0, 0, 4)  # 用于程序内部比较2
 # 构建信息
 BUILD_DATE = "2024-04-07"  # 更新构建日期
 BUILD_TYPE = "release"  # release, beta, alpha, dev
 
 # 版本字符串
-VERSION_STRING = f"AI小说实验室 v{VERSION} ({BUILD_TYPE})"
+VERSION_STRING = f"AI小说工具 v{VERSION} ({BUILD_TYPE})"
 
 def get_version():
     """获取版本号"""
