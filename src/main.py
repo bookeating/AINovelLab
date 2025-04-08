@@ -12,6 +12,7 @@ AI小说实验室 - 主程序入口
 import os
 import sys
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt
 
 # 导入辅助模块设置路径
 try:
@@ -25,12 +26,24 @@ import_helper.setup_paths()
 def main():
     """主函数"""
     try:
-        # 导入GUI主窗口
+        # 导入GUI主窗口和样式
         from gui.main_window import MainWindow
+        from gui.style import get_material_style
         
+        # 创建应用程序实例
         app = QApplication(sys.argv)
+        
+        # 设置应用程序属性
+        app.setAttribute(Qt.AA_UseHighDpiPixmaps)  # 使用高DPI图标
+        
+        # 应用 Material Design 样式表
+        app.setStyleSheet(get_material_style())
+        
+        # 创建并显示主窗口
         window = MainWindow()
         window.show()
+        
+        # 启动应用程序的事件循环
         sys.exit(app.exec_())
     except ImportError as e:
         print(f"导入错误: {e}")

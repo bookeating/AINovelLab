@@ -8,7 +8,7 @@ import os
 import sys
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                            QFileDialog, QMessageBox, QProgressBar, QTextEdit, 
-                           QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox)
+                           QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox, QFrame)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QTextCursor
 
@@ -36,6 +36,7 @@ class CondenserTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("condenser_tab")
         self.init_ui()
         self.worker_thread = None
         self.txt_files = []
@@ -52,22 +53,30 @@ class CondenserTab(QWidget):
         """初始化用户界面"""
         # 创建布局
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
         
         # 创建左右分栏布局
         split_layout = QHBoxLayout()
+        split_layout.setSpacing(15)
         
         # 左侧面板 - 控制区域
         left_panel = QVBoxLayout()
+        left_panel.setSpacing(10)
         
         # 文件夹选择
         folder_group = QGroupBox("选择TXT文件夹")
+        folder_group.setObjectName("folder_group")
         folder_layout = QHBoxLayout()
+        folder_layout.setContentsMargins(8, 10, 8, 10)
         
         self.folder_path_edit = QLineEdit()
+        self.folder_path_edit.setObjectName("folder_path_edit")
         self.folder_path_edit.setReadOnly(True)
         self.folder_path_edit.setPlaceholderText("请选择TXT文件所在文件夹...")
         
         browse_button = QPushButton("浏览...")
+        browse_button.setObjectName("browse_button")
         browse_button.clicked.connect(self.browse_folder)
         
         folder_layout.addWidget(self.folder_path_edit)
@@ -76,30 +85,43 @@ class CondenserTab(QWidget):
         
         # 输出目录选择
         output_group = QGroupBox("脱水输出目录")
+        output_group.setObjectName("output_group")
         output_layout = QHBoxLayout()
+        output_layout.setContentsMargins(8, 10, 8, 10)
         
         self.output_dir_edit = QLineEdit()
+        self.output_dir_edit.setObjectName("output_dir_edit")
         self.output_dir_edit.setReadOnly(True)
         self.output_dir_edit.setPlaceholderText("脱水处理结果输出目录...")
         
         output_browse_button = QPushButton("浏览...")
+        output_browse_button.setObjectName("output_browse_button")
         output_browse_button.clicked.connect(self.browse_output_dir)
         
         output_layout.addWidget(self.output_dir_edit)
         output_layout.addWidget(output_browse_button)
         output_group.setLayout(output_layout)
         
-        # 章节范围选择
-        range_group = QGroupBox("脱水章节范围")
+        # 添加强制生成选项
+        options_group = QGroupBox("脱水设置")
+        options_group.setObjectName("options_group")
+        options_layout = QVBoxLayout()
+        options_layout.setContentsMargins(5, 8, 5, 8)
+        
+        # 添加章节范围控制到选项组
         range_layout = QHBoxLayout()
         
         self.start_chapter_label = QLabel("开始章节:")
+        self.start_chapter_label.setObjectName("start_chapter_label")
         self.start_chapter_spin = QSpinBox()
+        self.start_chapter_spin.setObjectName("start_chapter_spin")
         self.start_chapter_spin.setRange(1, 10000)
         self.start_chapter_spin.setValue(1)
         
         self.end_chapter_label = QLabel("结束章节:")
+        self.end_chapter_label.setObjectName("end_chapter_label")
         self.end_chapter_spin = QSpinBox()
+        self.end_chapter_spin.setObjectName("end_chapter_spin")
         self.end_chapter_spin.setRange(1, 10000)
         self.end_chapter_spin.setValue(9999)
         
@@ -108,85 +130,67 @@ class CondenserTab(QWidget):
         range_layout.addWidget(self.end_chapter_label)
         range_layout.addWidget(self.end_chapter_spin)
         range_layout.addStretch()
-        range_group.setLayout(range_layout)
         
-        # 添加强制生成选项
-        options_group = QGroupBox("脱水选项")
-        options_layout = QVBoxLayout()
-        
+        # 添加强制生成复选框
         self.force_regenerate_checkbox = QCheckBox("强制生成")
+        self.force_regenerate_checkbox.setObjectName("force_regenerate_checkbox")
         self.force_regenerate_checkbox.setToolTip("勾选后将强制重新脱水，否则跳过已存在的文件")
         
         # 创建API类型组合框，始终使用混合模式
         self.api_type_combo = QComboBox()
+        self.api_type_combo.setObjectName("api_type_combo")
         self.api_type_combo.addItem("Gemini", "gemini")
         self.api_type_combo.addItem("OpenAI", "openai") 
         self.api_type_combo.addItem("混合使用", "mixed")
         self.api_type_combo.setCurrentIndex(2)  # 默认选择混合模式
         
-        # 添加脱水比例设置
-        condensation_group = QGroupBox("脱水比例设置")
-        condensation_layout = QVBoxLayout()
+        # 脱水比例设置 - 使用滑动条
+        ratio_layout = QVBoxLayout()
         
-        # 最小比例
-        min_ratio_layout = QHBoxLayout()
-        min_ratio_label = QLabel("最小脱水比例:")
+        # 脱水比例区间滑动条
+        ratio_range_layout = QHBoxLayout()
+        ratio_range_label = QLabel("脱水比例区间:")
+        ratio_range_label.setObjectName("ratio_range_label")
+        
         self.min_ratio_spin = QSpinBox()
+        self.min_ratio_spin.setObjectName("min_ratio_spin")
         self.min_ratio_spin.setRange(10, 90)
         self.min_ratio_spin.setValue(config.MIN_CONDENSATION_RATIO)
         self.min_ratio_spin.setSuffix("%")
         self.min_ratio_spin.setToolTip("设置脱水后文本相对于原文的最小比例")
         self.min_ratio_spin.valueChanged.connect(self.update_min_ratio)
-        min_ratio_layout.addWidget(min_ratio_label)
-        min_ratio_layout.addWidget(self.min_ratio_spin)
         
-        # 最大比例
-        max_ratio_layout = QHBoxLayout()
-        max_ratio_label = QLabel("最大脱水比例:")
         self.max_ratio_spin = QSpinBox()
+        self.max_ratio_spin.setObjectName("max_ratio_spin")
         self.max_ratio_spin.setRange(20, 95)
         self.max_ratio_spin.setValue(config.MAX_CONDENSATION_RATIO)
         self.max_ratio_spin.setSuffix("%")
         self.max_ratio_spin.setToolTip("设置脱水后文本相对于原文的最大比例")
         self.max_ratio_spin.valueChanged.connect(self.update_max_ratio)
-        max_ratio_layout.addWidget(max_ratio_label)
-        max_ratio_layout.addWidget(self.max_ratio_spin)
         
-        # 目标比例
-        target_ratio_layout = QHBoxLayout()
-        target_ratio_label = QLabel("目标脱水比例:")
-        self.target_ratio_spin = QSpinBox()
-        self.target_ratio_spin.setRange(15, 90)
-        self.target_ratio_spin.setValue(config.TARGET_CONDENSATION_RATIO)
-        self.target_ratio_spin.setSuffix("%")
-        self.target_ratio_spin.setToolTip("设置脱水后文本相对于原文的目标比例")
-        self.target_ratio_spin.valueChanged.connect(self.update_target_ratio)
-        target_ratio_layout.addWidget(target_ratio_label)
-        target_ratio_layout.addWidget(self.target_ratio_spin)
+        # 显示区间范围的标签和数值
+        ratio_range_layout.addWidget(ratio_range_label)
+        ratio_range_layout.addWidget(self.min_ratio_spin)
+        ratio_range_layout.addWidget(QLabel("-"))
+        ratio_range_layout.addWidget(self.max_ratio_spin)
+        ratio_range_layout.addStretch()
         
-        # 添加到脱水比例布局
-        condensation_layout.addLayout(min_ratio_layout)
-        condensation_layout.addLayout(max_ratio_layout)
-        condensation_layout.addLayout(target_ratio_layout)
-        condensation_group.setLayout(condensation_layout)
-        
-        # 不再显示API类型选择界面
-        # api_type_layout = QHBoxLayout()
-        # api_type_label = QLabel("API类型:")
-        # api_type_layout.addWidget(api_type_label)
-        # api_type_layout.addWidget(self.api_type_combo)
-        # api_type_layout.addStretch()
-        
-        options_layout.addWidget(self.force_regenerate_checkbox)
-        # options_layout.addLayout(api_type_layout)
+        # 将所有选项添加到选项布局中
+        options_layout.addLayout(range_layout)  # 章节范围
+        options_layout.addWidget(self.force_regenerate_checkbox)  # 强制生成选项
+        options_layout.addLayout(ratio_range_layout)  # 脱水比例区间
         options_group.setLayout(options_layout)
         
         # 状态和进度
         status_group = QGroupBox("状态")
+        status_group.setObjectName("status_group")
         status_layout = QVBoxLayout()
+        status_layout.setContentsMargins(5, 8, 5, 8)
         
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("progress_bar")
         self.status_label = QLabel("就绪")
+        self.status_label.setObjectName("status_label")
         
         status_layout.addWidget(self.progress_bar)
         status_layout.addWidget(self.status_label)
@@ -194,77 +198,83 @@ class CondenserTab(QWidget):
         
         # 文件列表显示
         files_group = QGroupBox("文件列表")
+        files_group.setObjectName("files_group")
         files_layout = QVBoxLayout()
+        files_layout.setContentsMargins(5, 8, 5, 8)
         
         self.files_text = QTextEdit()
+        self.files_text.setObjectName("files_text")
         self.files_text.setReadOnly(True)
         
         files_layout.addWidget(self.files_text)
         files_group.setLayout(files_layout)
         
-        # 操作按钮
-        button_layout = QHBoxLayout()
-        self.start_button = QPushButton("开始脱水")
-        self.start_button.clicked.connect(self.start_condensing)
-        
-        button_layout.addStretch()
-        button_layout.addWidget(self.start_button)
-        
-        # 将控制组件添加到左侧面板
+        # 添加所有组件到左侧面板
         left_panel.addWidget(folder_group)
         left_panel.addWidget(output_group)
-        left_panel.addWidget(range_group)
-        left_panel.addWidget(options_group)
-        left_panel.addWidget(condensation_group)  # 添加脱水比例设置
+        left_panel.addWidget(options_group)  # 已合并的脱水设置组
         left_panel.addWidget(status_group)
         left_panel.addWidget(files_group)
-        left_panel.addLayout(button_layout)
         
         # 右侧面板 - 日志区域
         right_panel = QVBoxLayout()
         
-        # 日志显示区域
+        # 日志显示
         log_group = QGroupBox("运行日志")
-        log_layout = QVBoxLayout()
+        log_group.setObjectName("log_group")
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(8, 10, 8, 10)
         
         self.log_text = QTextEdit()
+        self.log_text.setObjectName("log_text")
         self.log_text.setReadOnly(True)
-        self.log_text.setFont(QFont("Courier New", 9))
-        self.log_text.setLineWrapMode(QTextEdit.NoWrap)  # 禁用自动换行
         
-        # 在底部添加清除日志按钮和自动滚动选项
-        log_buttons_layout = QHBoxLayout()
-        self.auto_scroll_checkbox = QCheckBox("自动滚动")
-        self.auto_scroll_checkbox.setToolTip("勾选后日志会自动滚动到底部，取消勾选则保持当前位置")
-        self.auto_scroll_checkbox.setChecked(False)  # 默认不自动滚动
-        
-        self.line_wrap_checkbox = QCheckBox("自动换行")
-        self.line_wrap_checkbox.setToolTip("勾选后文本会自动换行显示，取消勾选则需要水平滚动查看")
-        self.line_wrap_checkbox.setChecked(False)  # 默认不自动换行
-        self.line_wrap_checkbox.stateChanged.connect(self.toggle_line_wrap)
+        # 添加换行模式切换
+        wrap_layout = QHBoxLayout()
+        self.wrap_checkbox = QCheckBox("自动换行")
+        self.wrap_checkbox.setObjectName("wrap_checkbox")
+        self.wrap_checkbox.setChecked(True)
+        self.wrap_checkbox.toggled.connect(self.toggle_line_wrap)
         
         self.clear_log_button = QPushButton("清除日志")
+        self.clear_log_button.setObjectName("clear_log_button")
         self.clear_log_button.clicked.connect(self.clear_log)
         
-        log_buttons_layout.addWidget(self.auto_scroll_checkbox)
-        log_buttons_layout.addWidget(self.line_wrap_checkbox)
-        log_buttons_layout.addStretch()
-        log_buttons_layout.addWidget(self.clear_log_button)
+        wrap_layout.addWidget(self.wrap_checkbox)
+        wrap_layout.addStretch()
+        wrap_layout.addWidget(self.clear_log_button)
         
-        log_layout.addWidget(self.log_text)
-        log_layout.addLayout(log_buttons_layout)
-        log_group.setLayout(log_layout)
+        # 添加开始脱水按钮到日志框下方
+        start_button = QPushButton("开始脱水")
+        start_button.setObjectName("start_button")
+        start_button.clicked.connect(self.start_condensing)
         
-        # 将日志组件添加到右侧面板
-        right_panel.addWidget(log_group)
+        right_layout.addWidget(self.log_text)
+        right_layout.addLayout(wrap_layout)
+        right_layout.addWidget(start_button)  # 将开始脱水按钮添加到右侧面板
+        log_group.setLayout(right_layout)
         
-        # 将左右面板添加到分栏布局
-        split_layout.addLayout(left_panel, 1)  # 比例1
-        split_layout.addLayout(right_panel, 1)  # 比例1
+        right_panel.addWidget(log_group, 1)
         
-        # 将分栏布局添加到主布局
+        # 添加左右面板到分栏布局
+        left_frame = QFrame()
+        left_frame.setObjectName("left_frame")
+        left_frame.setLayout(left_panel)
+        left_frame.setFrameShape(QFrame.StyledPanel)
+        
+        right_frame = QFrame()
+        right_frame.setObjectName("right_frame")
+        right_frame.setLayout(right_panel)
+        right_frame.setFrameShape(QFrame.StyledPanel)
+        
+        # 左侧占45%，右侧占55%
+        split_layout.addWidget(left_frame, 45)
+        split_layout.addWidget(right_frame, 55)
+        
+        # 添加分栏布局到主布局
         main_layout.addLayout(split_layout)
         
+        # 设置布局
         self.setLayout(main_layout)
     
     def add_log(self, message):
@@ -272,7 +282,7 @@ class CondenserTab(QWidget):
         self.log_text.append(message.rstrip())
         
         # 只在启用自动滚动时，才滚动到底部
-        if self.auto_scroll_checkbox.isChecked():
+        if self.wrap_checkbox.isChecked():
             scrollbar = self.log_text.verticalScrollBar()
             scrollbar.setValue(scrollbar.maximum())
     
@@ -453,6 +463,9 @@ class CondenserTab(QWidget):
             QMessageBox.warning(self, "错误", "请选择有效的脱水输出目录")
             return
             
+        # 计算当前的目标脱水比例
+        target_ratio = (self.min_ratio_spin.value() + self.max_ratio_spin.value()) // 2
+        
         # 准备参数
         args = {
             'input_files': self.txt_files,
@@ -463,7 +476,7 @@ class CondenserTab(QWidget):
             'api_type': api_type,  # 始终使用混合模式
             'min_condensation_ratio': self.min_ratio_spin.value(),
             'max_condensation_ratio': self.max_ratio_spin.value(),
-            'target_condensation_ratio': self.target_ratio_spin.value()
+            'target_condensation_ratio': target_ratio
         }
         
         # 创建并启动工作线程
@@ -482,7 +495,7 @@ class CondenserTab(QWidget):
         self.add_log(f"脱水输出目录: {self.output_dir}")
         self.add_log(f"强制生成模式: {'开启' if self.force_regenerate_checkbox.isChecked() else '关闭'}")
         self.add_log(f"API模式: 混合模式 (自动选择Gemini或OpenAI API)")
-        self.add_log(f"脱水比例设置: 最小{self.min_ratio_spin.value()}% - 最大{self.max_ratio_spin.value()}% (目标{self.target_ratio_spin.value()}%)")
+        self.add_log(f"脱水比例设置: 最小{self.min_ratio_spin.value()}% - 最大{self.max_ratio_spin.value()}% (目标{target_ratio}%)")
         
         # API可用性信息
         if gemini_initialized and openai_initialized:
@@ -534,10 +547,10 @@ class CondenserTab(QWidget):
             QMessageBox.critical(self, "操作失败", message)
             
     def toggle_line_wrap(self, state):
-        """切换自动换行选项"""
-        if state == Qt.Checked:
+        """切换日志文本的自动换行模式"""
+        if state:  # 如果勾选了自动换行
             self.log_text.setLineWrapMode(QTextEdit.WidgetWidth)
-        else:
+        else:  # 如果取消了自动换行
             self.log_text.setLineWrapMode(QTextEdit.NoWrap)
     
     def update_min_ratio(self, value):
@@ -545,29 +558,19 @@ class CondenserTab(QWidget):
         # 确保最小比例不大于最大比例
         if value > self.max_ratio_spin.value():
             self.max_ratio_spin.setValue(value)
-        # 确保目标比例不小于最小比例
-        if self.target_ratio_spin.value() < value:
-            self.target_ratio_spin.setValue(value)
+        # 自动计算目标比例为最大和最小的中间值
+        self.target_ratio = (value + self.max_ratio_spin.value()) // 2
         # 更新配置
         config.MIN_CONDENSATION_RATIO = value
+        config.TARGET_CONDENSATION_RATIO = self.target_ratio
     
     def update_max_ratio(self, value):
         """更新最大脱水比例"""
         # 确保最大比例不小于最小比例
         if value < self.min_ratio_spin.value():
             self.min_ratio_spin.setValue(value)
-        # 确保目标比例不大于最大比例
-        if self.target_ratio_spin.value() > value:
-            self.target_ratio_spin.setValue(value)
+        # 自动计算目标比例为最大和最小的中间值
+        self.target_ratio = (value + self.min_ratio_spin.value()) // 2
         # 更新配置
         config.MAX_CONDENSATION_RATIO = value
-    
-    def update_target_ratio(self, value):
-        """更新目标脱水比例"""
-        # 确保目标比例在最小和最大之间
-        if value < self.min_ratio_spin.value():
-            self.min_ratio_spin.setValue(value)
-        elif value > self.max_ratio_spin.value():
-            self.max_ratio_spin.setValue(value)
-        # 更新配置
-        config.TARGET_CONDENSATION_RATIO = value 
+        config.TARGET_CONDENSATION_RATIO = self.target_ratio 

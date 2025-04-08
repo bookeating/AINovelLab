@@ -6,8 +6,11 @@
 
 import os
 import sys
-from PyQt5.QtWidgets import QMainWindow, QTabWidget, QStatusBar
-from PyQt5.QtCore import QSize, pyqtSignal
+from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QStatusBar, 
+                            QVBoxLayout, QWidget, QLabel, QHBoxLayout, QFrame)
+from PyQt5.QtCore import QSize, pyqtSignal, Qt
+from PyQt5.QtGui import QFont, QIcon, QColor, QPalette
+from ctypes import windll, c_int, byref, sizeof
 
 # 导入版本信息（添加更健壮的错误处理）
 VERSION_STRING = "AI小说实验室"  # 默认版本字符串，如果无法导入版本模块则使用此值
@@ -30,6 +33,7 @@ from .epub_splitter_tab import EpubSplitterTab
 from .condenser_tab import CondenserTab
 from .txt_to_epub_tab import TxtToEpubTab
 from .api_test_tab import ApiTestTab
+from .resources import get_icon
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -42,37 +46,74 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.init_ui()
         self.setup_connections()
+        
+        # 在Windows上启用暗色标题栏
+        if hasattr(windll, 'dwmapi'):
+            # Windows 10 1809或更高版本
+            DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            windll.dwmapi.DwmSetWindowAttribute(
+                int(self.winId()),
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                byref(c_int(2)),
+                sizeof(c_int)
+            )
     
     def init_ui(self):
         """初始化用户界面"""
         # 设置窗口标题和大小
         self.setWindowTitle(VERSION_STRING)
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(900, 650)
+        
+        # 创建中央部件和主布局
+        central_widget = QWidget()
+        central_widget.setObjectName("centralWidget")
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
         
         # 创建标签页控件
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("mainTabs")
+        self.tabs.setDocumentMode(True)  # 使用更现代的文档模式外观
+        self.tabs.setTabPosition(QTabWidget.North)
         
         # 创建五个标签页
         self.home_tab = HomeTab()
+        self.home_tab.setObjectName("home_tab")
         self.epub_splitter_tab = EpubSplitterTab()
+        self.epub_splitter_tab.setObjectName("epub_splitter_tab")
         self.condenser_tab = CondenserTab()
+        self.condenser_tab.setObjectName("condenser_tab")
         self.txt_to_epub_tab = TxtToEpubTab()
+        self.txt_to_epub_tab.setObjectName("txt_to_epub_tab")
         self.api_test_tab = ApiTestTab()
+        self.api_test_tab.setObjectName("api_test_tab")
         
-        # 添加标签页到标签页控件
-        self.tabs.addTab(self.home_tab, "首页")
-        self.tabs.addTab(self.epub_splitter_tab, "EPUB转TXT")
-        self.tabs.addTab(self.condenser_tab, "脱水处理")
-        self.tabs.addTab(self.txt_to_epub_tab, "TXT转EPUB")
-        self.tabs.addTab(self.api_test_tab, "API测试")
+        # 添加标签页到标签页控件，并设置图标
+        self.tabs.addTab(self.home_tab, get_icon('home'), "首页")
+        self.tabs.addTab(self.epub_splitter_tab, get_icon('book'), "EPUB转TXT")
+        self.tabs.addTab(self.condenser_tab, get_icon('water'), "脱水处理")
+        self.tabs.addTab(self.txt_to_epub_tab, get_icon('convert'), "TXT转EPUB")
+        self.tabs.addTab(self.api_test_tab, get_icon('test'), "API测试")
         
-        # 设置中央控件
-        self.setCentralWidget(self.tabs)
+        # 设置标签页图标大小
+        self.tabs.setIconSize(QSize(20, 20))
+        
+        # 添加标签页控件到主布局
+        main_layout.addWidget(self.tabs)
         
         # 创建并设置状态栏
         status_bar = QStatusBar()
+        status_bar.setStyleSheet("color: #B0B0B0;")
         self.setStatusBar(status_bar)
         status_bar.showMessage(VERSION_STRING)
+        
+        # 设置中央控件
+        self.setCentralWidget(central_widget)
+        
+        # 设置窗口样式
+        self.setObjectName("mainWindow")
+        self.setWindowIcon(get_icon('book'))
         
         # 显示窗口
         self.show()
@@ -88,14 +129,20 @@ class MainWindow(QMainWindow):
         # 将主窗口信号连接到标签页
         self.split_path_changed.connect(self.condenser_tab.on_split_path_changed)
         self.condense_path_changed.connect(self.txt_to_epub_tab.on_condense_path_changed)
+        
+        # 标签页切换信号
+        self.tabs.currentChanged.connect(self.on_tab_changed)
     
     def on_split_complete(self, base_dir, output_dir):
         """EPUB分割完成后的处理"""
         # 发送信号，通知脱水处理标签页
         self.split_path_changed.emit(base_dir, output_dir)
         
-        # 可选：自动切换到脱水处理标签页
+        # 自动切换到脱水处理标签页
         self.tabs.setCurrentIndex(2)  # 索引2对应脱水处理标签页
+        
+        # 更新状态栏
+        self.statusBar().showMessage(f"EPUB分割完成，已保存到: {output_dir}")
     
     def on_condense_complete(self, base_dir, output_dir):
         """脱水处理完成后的处理"""
@@ -105,6 +152,15 @@ class MainWindow(QMainWindow):
         # 自动切换到TXT转EPUB标签页（只有在用户点击了"合并成EPUB"按钮时才会触发）
         self.tabs.setCurrentIndex(3)  # 索引3对应TXT转EPUB标签页
         
+        # 更新状态栏
+        self.statusBar().showMessage(f"脱水处理完成，已保存到: {output_dir}")
+    
+    def on_tab_changed(self, index):
+        """标签页切换时的处理"""
+        tab_names = ["首页", "EPUB转TXT", "脱水处理", "TXT转EPUB", "API测试"]
+        if 0 <= index < len(tab_names):
+            self.statusBar().showMessage(f"当前功能: {tab_names[index]}")
+    
     def closeEvent(self, event):
         """关闭窗口事件处理函数，确保所有后台线程都被停止"""
         # 停止所有可能存在的工作线程
