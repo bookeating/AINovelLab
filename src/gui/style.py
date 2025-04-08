@@ -565,7 +565,7 @@ def get_material_style():
     QWidget#condenser_tab QProgressBar {
         max-height: 6px;
         min-height: 6px;
-        font-size: 0px; /* 隐藏文字 */
+        color: transparent;  /* 使用 transparent 替代 font-size: 0px */
     }
     
     /* 脱水页面状态标签 */
@@ -644,6 +644,9 @@ def get_material_style():
         border-top-right-radius: 3px;
         width: 18px;
         height: 10px;
+        qproperty-text: "▲";
+        font-size: 8px;
+        color: white;
     }
     
     QSpinBox::down-button, QDoubleSpinBox::down-button {
@@ -654,23 +657,16 @@ def get_material_style():
         border-bottom-right-radius: 3px;
         width: 18px;
         height: 10px;
+        qproperty-text: "▼";
+        font-size: 8px;
+        color: white;
     }
     
-    /* 简化箭头定义 */
-    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-        width: 0;
-        height: 0;
-        border-style: solid;
-        border-width: 0 4px 4px 4px;
-        border-color: transparent transparent white transparent;
-    }
-    
+    /* 移除原有的箭头样式 */
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow,
     QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
         width: 0;
         height: 0;
-        border-style: solid;
-        border-width: 4px 4px 0 4px;
-        border-color: white transparent transparent transparent;
     }
     
     /* 脱水页面上下按钮 */

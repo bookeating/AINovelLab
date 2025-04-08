@@ -2,6 +2,8 @@
 
 本文档详细介绍了AI小说工具的项目结构和各模块功能。
 
+![项目结构概览](image/1.png)
+
 ## 目录结构
 
 ```
@@ -82,6 +84,8 @@ AINovelLab/
 - `condenser_tab.py` - 小说脱水功能界面
 - `txt_to_epub_tab.py` - TXT合并为EPUB功能界面
 - `worker.py` - 后台工作线程，处理耗时操作，避免界面卡顿
+
+![GUI界面示例](image/2.png)
 
 ## 配置管理
 

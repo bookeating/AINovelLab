@@ -34,6 +34,7 @@ from .condenser_tab import CondenserTab
 from .txt_to_epub_tab import TxtToEpubTab
 from .api_test_tab import ApiTestTab
 from .resources import get_icon
+from .style import get_material_style  # 导入样式表函数
 
 class MainWindow(QMainWindow):
     """主窗口类"""
@@ -44,6 +45,9 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        # 设置窗口样式
+        self.setWindowFlags(self.windowFlags())
+        
         self.init_ui()
         self.setup_connections()
         
@@ -57,6 +61,43 @@ class MainWindow(QMainWindow):
                 byref(c_int(2)),
                 sizeof(c_int)
             )
+        
+        # 如果运行在打包环境中，确保正确应用样式
+        if getattr(sys, 'frozen', False):
+            self.ensure_style_applied()
+    
+    def ensure_style_applied(self):
+        """确保在打包环境中正确应用样式表"""
+        try:
+            print("在打包环境中重新应用样式...")
+            # 重新应用主样式表
+            self.setStyleSheet(get_material_style())
+            
+            # 确保首页的卡片有正确的背景色
+            if hasattr(self, 'home_tab'):
+                # 添加额外的样式到首页
+                self.home_tab.setStyleSheet("""
+                QLabel {
+                    color: #FFFFFF;
+                    background-color: transparent;
+                }
+                #materialCard {
+                    background-color: #2D2D2D;
+                }
+                QLabel[title="true"] {
+                    color: #FFFFFF;
+                    font-weight: bold;
+                }
+                """)
+                
+                # 遍历首页中的所有卡片，确保标题和描述文本可见
+                for card in self.home_tab.findChildren(QFrame, "materialCard"):
+                    for label in card.findChildren(QLabel):
+                        label.setStyleSheet("color: #FFFFFF; background-color: transparent;")
+                
+            print("样式重新应用完成")
+        except Exception as e:
+            print(f"应用样式时出错: {e}")
     
     def init_ui(self):
         """初始化用户界面"""

@@ -245,13 +245,13 @@ class CondenserTab(QWidget):
         wrap_layout.addWidget(self.clear_log_button)
         
         # 添加开始脱水按钮到日志框下方
-        start_button = QPushButton("开始脱水")
-        start_button.setObjectName("start_button")
-        start_button.clicked.connect(self.start_condensing)
+        self.start_button = QPushButton("开始脱水")
+        self.start_button.setObjectName("start_button")
+        self.start_button.clicked.connect(self.start_condensing)
         
         right_layout.addWidget(self.log_text)
         right_layout.addLayout(wrap_layout)
-        right_layout.addWidget(start_button)  # 将开始脱水按钮添加到右侧面板
+        right_layout.addWidget(self.start_button)  # 将开始脱水按钮添加到右侧面板
         log_group.setLayout(right_layout)
         
         right_panel.addWidget(log_group, 1)

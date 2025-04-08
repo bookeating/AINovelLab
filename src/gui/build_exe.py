@@ -100,10 +100,13 @@ def main():
         "--add-data=api_keys.json;.",     # 添加API密钥文件
         "--add-data=src;src",             # 添加整个src目录
         "--add-data=src/gui;gui",         # 添加GUI模块
+        "--add-data=src/gui/style.py;gui",  # 特别添加样式文件
         "--hidden-import=PyQt5",          # 确保PyQt5被包含
         "--hidden-import=PyQt5.QtWidgets", # 添加必要的PyQt5子模块
         "--hidden-import=PyQt5.QtCore",
         "--hidden-import=PyQt5.QtGui",
+        "--hidden-import=src.gui.style",   # 添加样式模块作为隐藏导入
+        "--hidden-import=gui.style",       # 添加样式模块的替代路径
         "--hidden-import=ebooklib",       # 添加ebooklib依赖
         "--hidden-import=ebooklib.epub",  # 明确包含ebooklib.epub子模块
         "--hidden-import=bs4",            # 添加BeautifulSoup依赖

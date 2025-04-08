@@ -2,6 +2,8 @@
 
 本文档详细介绍了如何将AI小说工具打包为可执行文件。
 
+![打包流程](image/4.png)
+
 ## 环境准备
 
 打包前需要安装以下工具和依赖：
@@ -28,6 +30,8 @@ pyinstaller AINovelLab.spec
 ```
 
 打包后的文件将生成在`dist/AINovelLab`目录下。
+
+![打包结果](image/5.png)
 
 ### 3. 打包成ZIP压缩包
 

@@ -39,11 +39,12 @@ class CardWidget(QFrame):
         
         # 添加标题
         title_label = QLabel(title)
+        title_label.setProperty("title", "true")  # 添加属性以便样式表识别
         title_font = QFont()
         title_font.setPointSize(12)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #7986CB; background-color: transparent;")
+        title_label.setStyleSheet("color: #FFFFFF; background-color: transparent;")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
@@ -53,7 +54,7 @@ class CardWidget(QFrame):
         # 添加描述文本
         desc_label = QLabel(description)
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #E0E0E0; background-color: transparent;")
+        desc_label.setStyleSheet("color: #FFFFFF; background-color: transparent;")
         layout.addWidget(desc_label)
 
 class HomeTab(QWidget):
@@ -90,7 +91,7 @@ class HomeTab(QWidget):
         title_font.setBold(True)
         title_label.setFont(title_font)
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #A5B3E0; margin-bottom: 16px; background-color: transparent;")
+        title_label.setStyleSheet("color: #FFFFFF; margin-bottom: 16px; background-color: transparent;")
         content_layout.addWidget(title_label)
         
         # 添加应用简介卡片
@@ -111,7 +112,7 @@ class HomeTab(QWidget):
         # 添加使用流程区域标题
         flow_title = QLabel("使用流程")
         flow_title.setFont(QFont("", 14, QFont.Bold))
-        flow_title.setStyleSheet("color: #A5B3E0; margin-top: 8px; background-color: transparent;")
+        flow_title.setStyleSheet("color: #FFFFFF; margin-top: 8px; background-color: transparent;")
         content_layout.addWidget(flow_title)
         
         # 使用网格布局来放置三个卡片

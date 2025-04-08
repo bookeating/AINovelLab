@@ -2,6 +2,8 @@
 
 本文档详细介绍了AI小说工具支持的所有API服务配置方法。
 
+![API配置界面](image/1.png)
+
 ## 目录
 
 - [Gemini API配置](#gemini-api配置)
@@ -18,6 +20,8 @@
 2. 注册/登录账号
 3. 在左侧菜单中找到"API密钥"选项
 4. 创建新的API密钥并复制
+
+![Gemini API密钥获取](image/2.png)
 
 ### 基本配置示例
 
@@ -97,6 +101,8 @@
 2. 注册/登录账号
 3. 在右上角个人头像下拉菜单中选择"View API keys"
 4. 点击"Create new secret key"并复制生成的密钥
+
+![OpenAI API密钥获取](image/3.png)
 
 ### 基本配置示例
 

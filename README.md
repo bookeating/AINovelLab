@@ -1,16 +1,44 @@
-# AI小说工具(AINovelLab)
+# AI小说工具 (AINovelLab)
 
-这是一个用Python开发的小说处理工具套件，集成了以下功能：
+<img src="doc/image/1.png" width="600" alt="项目界面"/>
 
-1. **EPUB分割器**：将EPUB电子书分割为单章TXT文件
-2. **小说脱水工具**：使用AI自动将小说内容缩减至原文的30%-50%
-3. **TXT合并转EPUB**：将TXT文件合并为EPUB电子书
+这是一个用Python开发的小说处理工具套件，集成了多种AI服务，提供智能化的小说内容处理功能。
 
 ## 版本信息
 
 - 当前版本：v0.0.1 (release)
 - 构建日期：2024-04-07
-- 支持平台：Windows
+- 支持平台：Windows/macOS/Linux
+
+## 核心功能
+
+1. **EPUB分割器**
+   - 将EPUB电子书分割为单章TXT文件
+   - 支持自定义分割规则
+   - 批量处理多个文件
+
+   <img src="doc/image/2.png" width="400" alt="EPUB分割器界面"/>
+
+2. **小说脱水工具**
+   - 使用AI自动将小说内容缩减至原文的30%-50%
+   - 多API服务并行处理
+   - 智能API切换，提高效率
+   - 支持批量处理
+
+   <img src="doc/image/3.png" width="400" alt="脱水工具界面"/>
+
+3. **TXT合并转EPUB**
+   - 将TXT文件合并为EPUB电子书
+   - 自动提取元数据
+   - 生成目录和章节结构
+
+   <img src="doc/image/4.png" width="400" alt="TXT转EPUB界面"/>
+
+## API支持
+
+支持Gemini 和任何符合openai-api 规范的api，如DeepSeek 等
+
+<img src="doc/image/5.png" width="400" alt="API配置界面"/>
 
 ## 快速开始
 
@@ -34,15 +62,9 @@
 2. **脱水处理**：对TXT文件进行AI内容压缩
 3. **TXT转EPUB**：将处理后的TXT文件重新转换为EPUB格式
 
-### API配置
 
-本工具支持多种AI服务，包括：
+### API配置示例
 
-- Google Gemini API
-- OpenAI API（GPT系列模型）
-- 其他兼容OpenAI接口的服务（如DeepSeek、Grok等）
-
-**基本配置示例**：
 ```json
 {
   "gemini_api": [
@@ -63,31 +85,50 @@
 }
 ```
 
-> **详细API配置指南**：请参阅[API配置详细说明](doc/API_CONFIG.md)
+> **详细API配置**：请参阅[API配置详细说明](doc/API_CONFIG.md)
 
-## 脱水配置参数说明
+## 使用技巧
 
-本工具支持自定义脱水（压缩）比例参数：
+1. **提高处理效率**
+   - 配置多个API密钥实现并行处理
+   - 使用目录批量处理功能
+   - 合理设置压缩比例
 
-- `min_condensation_ratio`: 最小压缩比例（百分比），默认为30%
-- `max_condensation_ratio`: 最大压缩比例（百分比），默认为50%
-- `target_condensation_ratio`: 目标压缩比例（百分比），默认为40%
+2. **优化输出质量**
+   - 根据章节长度调整分割参数
+   - 选择合适的AI模型
+   - 使用更高质量的API服务
 
-通过调整这些参数，您可以控制小说脱水后的内容长度。较低的比例将产生更简洁的结果，较高的比例将保留更多原文内容。
+3. **文件命名规范**
+   - TXT文件命名格式：`小说名_[序号]_章节名.txt`
+   - 保持序号统一格式（如[001]）
+   - 避免特殊字符
 
-## 优化提示
+## 系统要求
 
-1. 小说脱水时，建议使用目录批量处理，可以配置多个API密钥提高效率
-2. 使用EPUB分割器时，可以根据章节数量调整每个文件的章节数
-3. 使用TXT转EPUB时，确保TXT文件按照"小说名_[序号]_章节名.txt"的格式命名
-4. 已打包的可执行文件可以直接修改根目录下的`api_keys.json`文件来更新API配置
+- 操作系统：Windows 10+/macOS 10.15+/Linux
+- 内存：4GB+
+- 存储空间：500MB+
+- Python版本：3.8+（从源码运行时）
 
 ## 更多信息
 
-- [详细API配置指南](doc/API_CONFIG.md) - 包含所有支持的API服务配置说明
-- [项目结构说明](doc/PROJECT_STRUCTURE.md) - 包含代码结构和模块说明
-- [打包说明](doc/BUILD_GUIDE.md) - 包含如何打包为可执行文件的说明
+- [API配置详细说明](doc/API_CONFIG.md)
+- [项目结构说明](doc/PROJECT_STRUCTURE.md)
+- [打包指南](doc/BUILD_GUIDE.md)
 
 ## 许可证
 
-本项目采用MIT许可证 
+本项目采用MIT许可证。详情请参阅 [LICENSE](LICENSE) 文件。
+
+## 问题反馈
+
+如果您在使用过程中遇到问题，欢迎通过以下方式反馈：
+
+- 提交Issue
+- 参与讨论
+- 发送Pull Request
+
+## 贡献者
+
+感谢所有为本项目做出贡献的开发者。 

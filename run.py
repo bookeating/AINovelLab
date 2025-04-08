@@ -60,7 +60,23 @@ def main():
             from gui.main_window import MainWindow
             import PyQt5.QtWidgets as QtWidgets
             
+            # 确保样式模块可用
+            try:
+                from gui.style import get_material_style
+                print("样式模块加载成功")
+            except ImportError as style_error:
+                print(f"警告：无法导入样式模块，界面可能不会正确显示。错误：{style_error}")
+            
             app = QtWidgets.QApplication(sys.argv)
+            
+            # 应用样式表
+            try:
+                from gui.style import get_material_style
+                print("应用样式表...")
+                app.setStyleSheet(get_material_style())
+            except Exception as style_error:
+                print(f"应用样式表失败：{style_error}")
+            
             window = MainWindow()
             window.show()
             sys.exit(app.exec_())
