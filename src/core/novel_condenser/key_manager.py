@@ -282,28 +282,28 @@ class APIKeyManager:
         # 计算所有API密钥的RPM总和
         total_rpm = sum(api_config.get('rpm', config.DEFAULT_KEY_RPM) for api_config in self.api_configs)
         
-        # 自由版API每分钟限制值（每个密钥RPM不能超过这个值）
-        free_tier_limit = 15
-        
         # 考虑每个密钥的实际限制
         adjusted_rpm = 0
         for api_config in self.api_configs:
             # 获取密钥的RPM设置
             key_rpm = api_config.get('rpm', config.DEFAULT_KEY_RPM)
-            # 应用自由版限制
-            actual_rpm = min(key_rpm, free_tier_limit)
-            adjusted_rpm += actual_rpm
+            adjusted_rpm += key_rpm
         
-        # 修改并发度计算逻辑，使小RPM值也能获得合理的并发度：
-        # 1. 对于单个密钥，每10个RPM支持1个并发（降低门槛）
-        # 2. 对于多个密钥，使用更积极的计算公式
+        # 修改并发度计算逻辑，根据密钥数量和RPM值更合理地计算并发数
+        # 1. 对于单个密钥，每5个RPM支持1个并发
+        # 2. 对于多个密钥，根据密钥数量和总RPM值计算
         
         if len(self.api_configs) == 1:
-            # 单个密钥时的计算逻辑：每10个RPM支持1个并发
+            # 单个密钥时的计算逻辑：每5个RPM支持1个并发
             safest_concurrency = max(1, int(adjusted_rpm / 5))
         else:
-            # 多个密钥时的计算逻辑：更积极地计算并发数
-            safest_concurrency = max(1, int(adjusted_rpm / 30))
+            # 多个密钥时的计算逻辑：每10个RPM支持1个并发，但至少有密钥数量一半的并发数
+            rpm_based = max(1, int(adjusted_rpm / 10))
+            key_count_based = max(1, len(self.api_configs) // 2)
+            safest_concurrency = max(rpm_based, key_count_based)
         
-        # 确保至少返回1，最大返回10
-        return min(safest_concurrency, 10) 
+        # 确保至少返回1，如果密钥数量大于5，最大并发数也可以更高
+        if len(self.api_configs) > 5:
+            return min(max(safest_concurrency, len(self.api_configs)), 20) 
+        else:
+            return min(safest_concurrency, 10) 

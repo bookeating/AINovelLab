@@ -258,13 +258,30 @@ class APIKeyManager:
         Returns:
             int: 最大可能的并发数
         """
-        # 计算基于RPM的最大并发
-        rpm_based_concurrency = min(
-            sum(config.get('rpm', DEFAULT_KEY_RPM) for config in self.api_configs),  # 所有密钥的RPM总和
-            self.max_rpm  # 全局RPM限制
-        )
+        if not self.api_configs:
+            return 1
+            
+        # 计算所有API密钥的RPM总和
+        total_rpm = sum(config.get('rpm', DEFAULT_KEY_RPM) for config in self.api_configs)
         
-        return rpm_based_concurrency
+        # 计算基于密钥数量和RPM的并发数
+        if len(self.api_configs) == 1:
+            # 单个密钥时的计算逻辑：每5个RPM支持1个并发
+            rpm_based_concurrency = max(1, int(total_rpm / 5))
+        else:
+            # 多个密钥时的计算逻辑：每10个RPM支持1个并发，但至少有密钥数量一半的并发数
+            rpm_based = max(1, int(total_rpm / 10))
+            key_count_based = max(1, len(self.api_configs) // 2)
+            rpm_based_concurrency = max(rpm_based, key_count_based)
+        
+        # 与全局RPM限制比较，取较小值
+        concurrency = min(rpm_based_concurrency, self.max_rpm)
+        
+        # 如果密钥数量大于5，增加最大并发上限
+        if len(self.api_configs) > 5:
+            return min(max(concurrency, len(self.api_configs)), 20)
+        else:
+            return min(concurrency, 10)
     
     def get_healthy_key_count(self) -> int:
         """获取当前健康（不在冷却期）的密钥数量

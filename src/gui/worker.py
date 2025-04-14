@@ -231,26 +231,74 @@ class WorkerThread(QThread):
         
         # 获取并显示并发数
         concurrency = 1
-        if hasattr(main_module, 'gemini_key_manager') and main_module.gemini_key_manager is not None:
-            concurrency = main_module.gemini_key_manager.get_max_concurrency()
+        gemini_concurrency = 0
+        openai_concurrency = 0
+        mixed_mode = api_type == "mixed"
+        
+        # 初始化API密钥管理器并获取并发数
+        # 初始化Gemini API密钥管理器（如果使用Gemini或混合模式）
+        if api_type == "gemini" or mixed_mode:
+            if hasattr(main_module, 'gemini_key_manager') and main_module.gemini_key_manager is not None:
+                gemini_concurrency = main_module.gemini_key_manager.get_max_concurrency()
+                gemini_api_count = len(config.GEMINI_API_CONFIG) if hasattr(config, 'GEMINI_API_CONFIG') else 0
+            else:
+                # 尝试初始化Gemini API密钥管理器
+                try:
+                    if hasattr(config, 'GEMINI_API_CONFIG') and config.GEMINI_API_CONFIG:
+                        main_module.gemini_key_manager = key_manager.APIKeyManager(
+                            config.GEMINI_API_CONFIG, 
+                            config.DEFAULT_MAX_RPM
+                        )
+                        gemini_concurrency = main_module.gemini_key_manager.get_max_concurrency()
+                        gemini_api_count = len(config.GEMINI_API_CONFIG)
+                    else:
+                        gemini_api_count = 0
+                        print("未配置Gemini API密钥", flush=True)
+                except Exception as e:
+                    print(f"初始化Gemini API密钥管理器失败: {e}", flush=True)
+                    gemini_api_count = 0
+        
+        # 初始化OpenAI API密钥管理器（如果使用OpenAI或混合模式）
+        if api_type == "openai" or mixed_mode:
+            if hasattr(main_module, 'openai_key_manager') and main_module.openai_key_manager is not None:
+                openai_concurrency = main_module.openai_key_manager.get_max_concurrency()
+                openai_api_count = len(config.OPENAI_API_CONFIG) if hasattr(config, 'OPENAI_API_CONFIG') else 0
+            else:
+                # 尝试初始化OpenAI API密钥管理器
+                try:
+                    if hasattr(config, 'OPENAI_API_CONFIG') and config.OPENAI_API_CONFIG:
+                        main_module.openai_key_manager = key_manager.APIKeyManager(
+                            config.OPENAI_API_CONFIG, 
+                            config.DEFAULT_MAX_RPM
+                        )
+                        openai_concurrency = main_module.openai_key_manager.get_max_concurrency()
+                        openai_api_count = len(config.OPENAI_API_CONFIG)
+                    else:
+                        openai_api_count = 0
+                        print("未配置OpenAI API密钥", flush=True)
+                except Exception as e:
+                    print(f"初始化OpenAI API密钥管理器失败: {e}", flush=True)
+                    openai_api_count = 0
+        
+        # 计算总并发数和总API密钥数量
+        if mixed_mode:
+            concurrency = gemini_concurrency + openai_concurrency
+            api_count = gemini_api_count + openai_api_count
+            print(f"API类型: {api_type}", flush=True)
+            print(f"当前API密钥并发数: {concurrency} (Gemini={gemini_concurrency}, OpenAI={openai_concurrency})", flush=True)
+            print(f"可用API密钥数量: {api_count} (Gemini={gemini_api_count}, OpenAI={openai_api_count})", flush=True)
+        elif api_type == "gemini":
+            concurrency = gemini_concurrency
+            api_count = gemini_api_count
+            print(f"API类型: {api_type}", flush=True)
             print(f"当前API密钥并发数: {concurrency}", flush=True)
-            api_count = len(config.GEMINI_API_CONFIG) if hasattr(config, 'GEMINI_API_CONFIG') else 0
             print(f"可用API密钥数量: {api_count}", flush=True)
-        else:
-            # 尝试初始化API密钥管理器
-            try:
-                if hasattr(config, 'GEMINI_API_CONFIG') and config.GEMINI_API_CONFIG:
-                    main_module.gemini_key_manager = key_manager.APIKeyManager(
-                        config.GEMINI_API_CONFIG, 
-                        config.DEFAULT_MAX_RPM
-                    )
-                    concurrency = main_module.gemini_key_manager.get_max_concurrency()
-                    print(f"已初始化API密钥管理器，当前API密钥并发数: {concurrency}", flush=True)
-                else:
-                    print("未配置API密钥，无法使用并发处理", flush=True)
-            except Exception as e:
-                print(f"初始化API密钥管理器失败: {e}", flush=True)
-                print("未配置API密钥，无法使用并发处理", flush=True)
+        else:  # openai
+            concurrency = openai_concurrency
+            api_count = openai_api_count
+            print(f"API类型: {api_type}", flush=True)
+            print(f"当前API密钥并发数: {concurrency}", flush=True)
+            print(f"可用API密钥数量: {api_count}", flush=True)
         
         # 筛选出我们需要处理的章节
         files_to_process = []
