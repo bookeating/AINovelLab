@@ -123,6 +123,13 @@ class ApiTestTab(QWidget):
         
         self.signals = ApiTestSignals()
         self.signals.test_complete.connect(self.on_test_complete)
+        
+        # 添加测试状态跟踪变量
+        self.testing_all = False        # 是否正在进行"测试全部"操作
+        self.total_tests = 0            # 当前测试批次中的总测试数量
+        self.completed_tests = 0        # 当前批次中已完成的测试数量
+        self.test_queue = []            # 测试队列，存储待测试的API信息
+        
         self.init_ui()
     
     def init_ui(self):
@@ -153,6 +160,11 @@ class ApiTestTab(QWidget):
         button_layout.addStretch()
         main_layout.addLayout(button_layout)
         
+        # 添加进度标签
+        self.progress_label = QLabel("")
+        main_layout.addWidget(self.progress_label)
+        self.progress_label.hide()  # 初始隐藏进度标签
+        
         # 创建API列表表格
         self.api_table = QTableWidget()
         self.api_table.setColumnCount(4)
@@ -174,7 +186,14 @@ class ApiTestTab(QWidget):
         
         # 创建一个特定的调用函数，避免lambda捕获问题
         def on_test_clicked(checked=False, a_type=api_type, idx=index):
-            self.test_api(a_type, idx)
+            # 获取按钮所在的表格行
+            for row in range(self.api_table.rowCount()):
+                if self.api_table.cellWidget(row, 3) == button:
+                    self.test_api(a_type, idx, row)
+                    break
+            else:
+                # 如果未找到对应行，使用-1表示未知行
+                self.test_api(a_type, idx, -1)
         
         button.clicked.connect(on_test_clicked)
         return button
@@ -358,52 +377,127 @@ class ApiTestTab(QWidget):
         self.load_api_list()
     
     def test_all_apis(self):
-        """测试所有API"""
+        """测试所有API - 改进版，使用任务队列确保所有测试都能执行"""
+        # 如果已经在测试中，不执行新的测试批次
+        if self.testing_all:
+            print("已有测试正在进行中，请等待完成")
+            return
+            
+        # 设置测试状态
+        self.testing_all = True
+        self.test_queue = []  # 清空测试队列
+        self.completed_tests = 0
+        
         # 禁用测试按钮
         self.test_all_button.setEnabled(False)
         self.test_all_button.setText("测试中...")
         
-        # 遍历表格中的所有行，点击对应的测试按钮
+        # 收集所有需要测试的API
         for row in range(self.api_table.rowCount()):
-            if self.api_table.cellWidget(row, 3):
-                # 获取API类型和索引
-                api_type = "gemini" if self.api_table.item(row, 0).text() == "Gemini" else "openai"
+            # 跳过非API行（如提示行）
+            if not self.api_table.cellWidget(row, 3):
+                continue
                 
-                # 遍历API配置查找匹配的索引
-                # 从UserRole数据中获取原始模型名称
-                model_item = self.api_table.item(row, 1)
-                model_name = model_item.data(Qt.UserRole) or model_item.text()
+            # 获取API类型和索引
+            api_type = "gemini" if self.api_table.item(row, 0).text() == "Gemini" else "openai"
+            
+            # 从UserRole数据中获取原始模型名称
+            model_item = self.api_table.item(row, 1)
+            if not model_item:
+                continue
                 
-                # 从显示文本中提取原始模型名称（如果没有存储在UserRole中）
-                if not model_name and "(" in model_item.text():
-                    model_name = model_item.text().split(" (")[0]
-                
-                index = -1
-                
-                if api_type == "gemini":
-                    for i, api in enumerate(GEMINI_API_CONFIG):
-                        if api.get("model", "未指定") == model_name:
-                            index = i
-                            break
-                elif api_type == "openai":
-                    for i, api in enumerate(OPENAI_API_CONFIG):
-                        if api.get("model", "未指定") == model_name:
-                            index = i
-                            break
-                
-                if index >= 0:
-                    self.test_api(api_type, index)
+            model_name = model_item.data(Qt.UserRole) or model_item.text()
+            
+            # 从显示文本中提取原始模型名称（如果没有存储在UserRole中）
+            if not model_name and "(" in model_item.text():
+                model_name = model_item.text().split(" (")[0]
+            
+            # 查找对应的API配置索引
+            config_list = GEMINI_API_CONFIG if api_type == "gemini" else OPENAI_API_CONFIG
+            
+            found_matching_api = False
+            for i, api in enumerate(config_list):
+                if api.get("model", "未指定") == model_name:
+                    # 将此API添加到测试队列，包含表格行索引
+                    # 元组格式: (api_type, config_index, table_row_index)
+                    self.test_queue.append((api_type, i, row))
+                    
+                    # 更新状态
+                    status_item = self.api_table.item(row, 2)
+                    if status_item:
+                        status_item.setText("等待测试...")
+                        status_item.setBackground(QColor(255, 255, 0, 100))  # 半透明黄色
+                    # 禁用单个测试按钮
+                    if self.api_table.cellWidget(row, 3):
+                        self.api_table.cellWidget(row, 3).setEnabled(False)
+                    
+                    found_matching_api = True
+                    break
+            
+            # 如果没有找到匹配的API配置，标记为"配置缺失"
+            if not found_matching_api:
+                status_item = self.api_table.item(row, 2)
+                if status_item:
+                    status_item.setText("配置缺失")
+                    status_item.setBackground(QColor(255, 165, 0, 100))  # 半透明橙色
         
-        # 启用测试按钮
-        self.test_all_button.setEnabled(True)
-        self.test_all_button.setText("测试全部API")
+        # 设置总测试数量
+        self.total_tests = len(self.test_queue)
+        
+        # 显示和更新进度标签
+        self._update_test_progress()
+        
+        if self.total_tests == 0:
+            # 没有找到任何API，恢复测试按钮
+            self.test_all_button.setEnabled(True)
+            self.test_all_button.setText("测试全部API")
+            self.testing_all = False
+            self.progress_label.setText("没有找到可测试的API")
+            self.progress_label.show()
+            return
+        
+        # 启动第一批测试（最多同时测试5个API）
+        self._start_next_tests(min(5, self.total_tests))
     
-    def test_api(self, api_type, index):
-        """测试指定的API"""
+    def _start_next_tests(self, count=1):
+        """从队列中启动下一批测试
+        
+        Args:
+            count: 要启动的测试数量
+        """
+        tests_started = 0
+        
+        # 启动指定数量的测试，或直到队列为空
+        while tests_started < count and self.test_queue:
+            api_type, index, row_index = self.test_queue.pop(0)
+            self.test_api(api_type, index, row_index)
+            tests_started += 1
+    
+    def _update_test_progress(self):
+        """更新测试进度显示"""
+        if self.total_tests > 0:
+            progress_text = f"测试进度: {self.completed_tests}/{self.total_tests}"
+            if self.completed_tests < self.total_tests:
+                queue_left = len(self.test_queue)
+                running = self.total_tests - self.completed_tests - queue_left
+                progress_text += f" (运行中: {running}, 等待: {queue_left})"
+            self.progress_label.setText(progress_text)
+            self.progress_label.show()
+        else:
+            self.progress_label.hide()
+    
+    def test_api(self, api_type, index, row_index=-1):
+        """测试指定的API
+        
+        Args:
+            api_type: API类型 ("gemini" 或 "openai")
+            index: API配置索引
+            row_index: 表格行索引，用于直接更新状态
+        """
         # 获取API信息
         api_key = ""
         api_model = ""
-        api_id = f"{api_type}_{index}"
+        api_id = f"{api_type}_{index}_{row_index}"  # 在API ID中包含行索引
         
         if api_type == "gemini" and index < len(GEMINI_API_CONFIG):
             api_info = GEMINI_API_CONFIG[index]
@@ -418,17 +512,44 @@ class ApiTestTab(QWidget):
             return
         
         # 更新状态为"测试中"
-        for row in range(self.api_table.rowCount()):
-            api_type_text = self.api_table.item(row, 0).text()
-            api_model_text = self.api_table.item(row, 1).text()
-            
-            if ((api_type == "gemini" and api_type_text == "Gemini") or 
-                (api_type == "openai" and api_type_text == "OpenAI")) and api_model_text == api_model:
-                self.api_table.item(row, 2).setText("测试中...")
-                # 禁用测试按钮
-                if self.api_table.cellWidget(row, 3):
-                    self.api_table.cellWidget(row, 3).setEnabled(False)
-                break
+        if row_index >= 0 and row_index < self.api_table.rowCount():
+            # 如果提供了有效的行索引，直接更新该行
+            status_item = self.api_table.item(row_index, 2)
+            if status_item:
+                status_item.setText("测试中...")
+                status_item.setBackground(QColor(173, 216, 230, 100))  # 半透明浅蓝色
+            # 禁用测试按钮
+            if self.api_table.cellWidget(row_index, 3):
+                self.api_table.cellWidget(row_index, 3).setEnabled(False)
+        else:
+            # 否则使用原来的查找逻辑
+            for row in range(self.api_table.rowCount()):
+                api_type_text = self.api_table.item(row, 0).text()
+                model_item = self.api_table.item(row, 1)
+                if not model_item:
+                    continue
+                    
+                api_model_text = model_item.text()
+                
+                if ((api_type == "gemini" and api_type_text == "Gemini") or 
+                    (api_type == "openai" and api_type_text == "OpenAI")):
+                    
+                    # 从UserRole数据中获取原始模型名称
+                    model_name = model_item.data(Qt.UserRole) or model_item.text()
+                    
+                    # 从显示文本中提取原始模型名称（如果没有存储在UserRole中）
+                    if not model_name and "(" in model_item.text():
+                        model_name = model_item.text().split(" (")[0]
+                    
+                    if model_name == api_model:
+                        status_item = self.api_table.item(row, 2)
+                        if status_item:
+                            status_item.setText("测试中...")
+                            status_item.setBackground(QColor(173, 216, 230, 100))  # 半透明浅蓝色
+                        # 禁用测试按钮
+                        if self.api_table.cellWidget(row, 3):
+                            self.api_table.cellWidget(row, 3).setEnabled(False)
+                        break
         
         # 在后台线程中测试API连接
         thread = threading.Thread(target=self._test_api_connection, 
@@ -436,14 +557,30 @@ class ApiTestTab(QWidget):
         thread.daemon = True
         thread.start()
     
-    def _test_api_connection(self, api_id, api_type, api_key, model):
+    def _test_api_connection(self, api_id, api_type, api_key, api_model):
         """在后台线程中测试API连接，参考api_service.py的实现"""
         try:
+            # 从api_id中提取API索引和行索引
+            parts = api_id.split("_")
+            if len(parts) == 3:  # 新格式: type_index_row
+                api_index = int(parts[1])
+                row_index = int(parts[2])
+            else:  # 旧格式兼容: type_index
+                api_index = int(parts[1])
+                row_index = -1
+            
             if api_type == "gemini":
                 # 测试Gemini API
                 # 获取更多参数
-                api_index = int(api_id.split('_')[1])
-                api_config = GEMINI_API_CONFIG[api_index]
+                api_config = None
+                
+                # 确保索引有效，防止索引越界
+                if 0 <= api_index < len(GEMINI_API_CONFIG):
+                    api_config = GEMINI_API_CONFIG[api_index]
+                else:
+                    self.signals.test_complete.emit(api_id, False, "API配置无效：索引超出范围")
+                    return
+                    
                 redirect_url = api_config.get('redirect_url', '')
                 
                 # 构建正确的API URL格式
@@ -462,10 +599,10 @@ class ApiTestTab(QWidget):
                             final_api_url += '/'
                         
                         # 添加模型名和方法
-                        final_api_url += f"{model}:generateContent"
+                        final_api_url += f"{api_model}:generateContent"
                 else:
                     # 使用默认URL
-                    final_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                    final_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{api_model}:generateContent"
                 
                 # 构建请求头
                 headers = {
@@ -510,61 +647,95 @@ class ApiTestTab(QWidget):
                 print(f"请求头: {headers}")
                 print(f"请求体示例: {json.dumps(request_data, ensure_ascii=False)[:100]}...")
                 
-                # 发送请求
-                response = requests.post(final_api_url, headers=headers, json=request_data, timeout=30)
-                response.raise_for_status()  # 这会在HTTP错误时抛出异常
-                
-                # 检查响应是否包含预期的结构
-                resp_json = response.json()
-                print(f"响应状态码: {response.status_code}")
-                print(f"响应头: {response.headers}")
-                print(f"响应体示例: {json.dumps(resp_json, ensure_ascii=False)[:100]}...")
-                
-                # 增强的响应检测逻辑，支持多种不同的响应格式
-                success = False
-                
-                # 标准Gemini格式
-                if "candidates" in resp_json and len(resp_json["candidates"]) > 0:
-                    success = True
-                
-                # 一些第三方API使用不同的响应格式
-                elif "response" in resp_json:
-                    success = True
-                
-                # 某些代理使用output字段
-                elif "output" in resp_json:
-                    success = True
-                
-                # 某些API直接返回内容数组
-                elif "results" in resp_json:
-                    success = True
-                
-                # 某些API将结果封装在data字段中
-                elif "data" in resp_json:
-                    data = resp_json["data"]
-                    if isinstance(data, dict) and ("candidates" in data or "content" in data):
+                try:
+                    # 发送请求
+                    response = requests.post(final_api_url, headers=headers, json=request_data, timeout=30)
+                    response.raise_for_status()  # 这会在HTTP错误时抛出异常
+                    
+                    # 检查响应是否包含预期的结构
+                    resp_json = response.json()
+                    print(f"响应状态码: {response.status_code}")
+                    print(f"响应头: {response.headers}")
+                    print(f"响应体示例: {json.dumps(resp_json, ensure_ascii=False)[:100]}...")
+                    
+                    # 增强的响应检测逻辑，支持多种不同的响应格式
+                    success = False
+                    
+                    # 标准Gemini格式
+                    if "candidates" in resp_json and len(resp_json["candidates"]) > 0:
                         success = True
-                
-                # 某些API使用content作为直接返回
-                elif "content" in resp_json:
-                    success = True
-                
-                # 有效响应
-                if success:
-                    self.signals.test_complete.emit(api_id, True, "")
-                else:
-                    # 如果没有找到有效结构，但HTTP响应是200，认为是成功的
-                    if response.status_code == 200:
-                        print("没有找到标准的响应字段，但HTTP状态为200，认为API可用")
+                    
+                    # 一些第三方API使用不同的响应格式
+                    elif "response" in resp_json:
+                        success = True
+                    
+                    # 某些代理使用output字段
+                    elif "output" in resp_json:
+                        success = True
+                    
+                    # 某些API直接返回内容数组
+                    elif "results" in resp_json:
+                        success = True
+                    
+                    # 某些API将结果封装在data字段中
+                    elif "data" in resp_json:
+                        data = resp_json["data"]
+                        if isinstance(data, dict) and ("candidates" in data or "content" in data):
+                            success = True
+                    
+                    # 某些API使用content作为直接返回
+                    elif "content" in resp_json:
+                        success = True
+                    
+                    # 有效响应
+                    if success:
                         self.signals.test_complete.emit(api_id, True, "")
                     else:
-                        self.signals.test_complete.emit(api_id, False, "API响应格式不正确，未找到有效的响应字段")
+                        # 如果没有找到有效结构，但HTTP响应是200，认为是成功的
+                        if response.status_code == 200:
+                            print("没有找到标准的响应字段，但HTTP状态为200，认为API可用")
+                            self.signals.test_complete.emit(api_id, True, "")
+                        else:
+                            self.signals.test_complete.emit(api_id, False, "API响应格式不正确，未找到有效的响应字段")
+                except requests.exceptions.HTTPError as e:
+                    error_msg = str(e)
+                    status_code = e.response.status_code if hasattr(e, 'response') else "未知"
+                    
+                    # 尝试获取更详细的错误信息
+                    try:
+                        error_text = e.response.text
+                        print(f"错误响应: {error_text}")
+                        error_json = e.response.json()
+                        print(f"错误JSON: {json.dumps(error_json, ensure_ascii=False)}")
+                        if "error" in error_json:
+                            if "message" in error_json["error"]:
+                                error_msg = error_json["error"]["message"]
+                            elif "msg" in error_json["error"]:
+                                error_msg = error_json["error"]["msg"]
+                    except:
+                        pass
+                        
+                    self.signals.test_complete.emit(api_id, False, f"HTTP错误 {status_code}: {error_msg}")
+                    return
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, 
+                       requests.exceptions.RequestException, json.JSONDecodeError) as e:
+                    # 统一处理常见异常
+                    error_type = type(e).__name__
+                    self.signals.test_complete.emit(api_id, False, f"{error_type}: {str(e)}")
+                    return
             
             elif api_type == "openai":
                 # 测试OpenAI API
                 # 获取更多参数
-                api_index = int(api_id.split('_')[1])
-                api_config = OPENAI_API_CONFIG[api_index]
+                api_config = None
+                
+                # 确保索引有效，防止索引越界
+                if 0 <= api_index < len(OPENAI_API_CONFIG):
+                    api_config = OPENAI_API_CONFIG[api_index]
+                else:
+                    self.signals.test_complete.emit(api_id, False, "API配置无效：索引超出范围")
+                    return
+                    
                 redirect_url = api_config.get('redirect_url', '')
                 
                 # 构建正确的API URL格式 - 避免添加额外的路径
@@ -593,7 +764,7 @@ class ApiTestTab(QWidget):
                 
                 # 构建OpenAI格式的请求体
                 request_data = {
-                    "model": model,
+                    "model": api_model,
                     "messages": [
                         {
                             "role": "user",
@@ -618,7 +789,6 @@ class ApiTestTab(QWidget):
                 print(f"请求头: {headers}")
                 print(f"请求体: {json.dumps(request_data, ensure_ascii=False)}")
                 
-                # 发送请求
                 try:
                     # 对于第三方API增加超时时间，它们通常响应较慢
                     timeout = 60 if redirect_url and not "openai.com" in redirect_url else 30
@@ -672,10 +842,9 @@ class ApiTestTab(QWidget):
                             self.signals.test_complete.emit(api_id, True, "")
                         else:
                             self.signals.test_complete.emit(api_id, False, "API响应格式不正确，未找到有效的响应字段")
-                
                 except requests.exceptions.HTTPError as e:
                     error_msg = str(e)
-                    status_code = e.response.status_code if hasattr(e, 'response') else None
+                    status_code = e.response.status_code if hasattr(e, 'response') else "未知"
                     
                     # 尝试获取更详细的错误信息
                     try:
@@ -689,7 +858,8 @@ class ApiTestTab(QWidget):
                             elif "msg" in error_json["error"]:
                                 error_msg = error_json["error"]["msg"]
                     except:
-                        if hasattr(e, 'response'):
+                        # 如果无法解析JSON，至少尝试获取响应文本
+                        if hasattr(e, 'response') and hasattr(e.response, 'text'):
                             error_msg = f"{error_msg} - 响应: {e.response.text[:100]}"
                     
                     # 处理HTTP 404错误 - 可能是API路径不正确
@@ -698,46 +868,22 @@ class ApiTestTab(QWidget):
                     
                     self.signals.test_complete.emit(api_id, False, f"HTTP错误 {status_code}: {error_msg}")
                     return
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, 
+                       requests.exceptions.RequestException, json.JSONDecodeError) as e:
+                    # 统一处理常见异常
+                    error_type = type(e).__name__
+                    self.signals.test_complete.emit(api_id, False, f"{error_type}: {str(e)}")
+                    return
             
             else:
+                # 不支持的API类型
                 self.signals.test_complete.emit(api_id, False, f"不支持的API类型: {api_type}")
+                return
         
-        except requests.exceptions.HTTPError as e:
-            error_msg = str(e)
-            status_code = e.response.status_code if hasattr(e, 'response') else None
-            
-            # 尝试获取更详细的错误信息
-            try:
-                error_text = e.response.text
-                print(f"错误响应: {error_text}")
-                error_json = e.response.json()
-                print(f"错误JSON: {json.dumps(error_json, ensure_ascii=False)}")
-                if "error" in error_json:
-                    if "message" in error_json["error"]:
-                        error_msg = error_json["error"]["message"]
-                    elif "msg" in error_json["error"]:
-                        error_msg = error_json["error"]["msg"]
-            except:
-                if hasattr(e, 'response'):
-                    error_msg = f"{error_msg} - 响应: {e.response.text[:100]}"
-                    
-            self.signals.test_complete.emit(api_id, False, f"HTTP错误 {status_code}: {error_msg}")
-            
-        except requests.exceptions.ConnectionError:
-            self.signals.test_complete.emit(api_id, False, "连接错误，请检查网络或API端点是否正确")
-            
-        except requests.exceptions.Timeout:
-            self.signals.test_complete.emit(api_id, False, "请求超时，API服务器可能响应较慢")
-            
-        except requests.exceptions.RequestException as e:
-            self.signals.test_complete.emit(api_id, False, f"请求错误: {str(e)}")
-            
-        except json.JSONDecodeError:
-            self.signals.test_complete.emit(api_id, False, "无法解析API响应，返回的不是有效的JSON")
-            
         except Exception as e:
+            # 捕获所有未处理的异常，确保测试完成信号始终被发送
             import traceback
-            print(f"未捕获异常: {str(e)}")
+            print(f"API测试过程中发生未预期的异常: {str(e)}")
             print(traceback.format_exc())
             self.signals.test_complete.emit(api_id, False, f"测试出错: {str(e)}")
     
@@ -745,11 +891,12 @@ class ApiTestTab(QWidget):
         """测试完成后的回调"""
         # 解析API ID
         parts = api_id.split("_")
-        if len(parts) != 2:
+        if len(parts) != 3:
             return
         
         api_type = parts[0]
         index = int(parts[1])
+        row_index = int(parts[2])
         
         # 获取API信息
         api_info = None
@@ -776,35 +923,11 @@ class ApiTestTab(QWidget):
             pass
         
         # 更新表格中的状态
-        for row in range(self.api_table.rowCount()):
-            api_type_text = self.api_table.item(row, 0).text()
-            model_item = self.api_table.item(row, 1)
-            
-            # 从UserRole数据中获取原始模型名称
-            model_name = model_item.data(Qt.UserRole) or model_item.text()
-            
-            # 从显示文本中提取原始模型名称（如果没有存储在UserRole中）
-            if not model_name and "(" in model_item.text():
-                model_name = model_item.text().split(" (")[0]
-            
-            # 检查API类型和模型是否匹配
-            type_matches = (api_type == "gemini" and api_type_text == "Gemini") or \
-                          (api_type == "openai" and api_type_text == "OpenAI")
-            
-            model_matches = model_name == api_model
-            
-            # 如果有域名信息，则使用域名进一步确认匹配
-            domain_matches = True
-            if url_domain and "(" in model_item.text():
-                display_domain = model_item.text().split("(")[1].rstrip(")")
-                # 检查域名的第一部分是否匹配
-                domain_first_part = url_domain.split('.')[0] if '.' in url_domain else url_domain
-                if display_domain != "官方API" and display_domain != domain_first_part:
-                    domain_matches = False
-            
-            if type_matches and model_matches and domain_matches:
-                # 更新状态
-                status_item = self.api_table.item(row, 2)
+        row_found = False
+        if row_index >= 0 and row_index < self.api_table.rowCount():
+            # 如果提供了有效的行索引，直接更新该行
+            status_item = self.api_table.item(row_index, 2)
+            if status_item:
                 if success:
                     status_item.setText("测试通过")
                     status_item.setBackground(QColor(0, 255, 0, 100))  # 半透明绿色
@@ -814,10 +937,109 @@ class ApiTestTab(QWidget):
                         status_text += f": {error_message}"
                     status_item.setText(status_text)
                     status_item.setBackground(QColor(255, 0, 0, 100))  # 半透明红色
+            
+            # 重新启用测试按钮
+            if self.api_table.cellWidget(row_index, 3):
+                self.api_table.cellWidget(row_index, 3).setEnabled(True)
+            
+            row_found = True
+        
+        # 如果没有找到有效行，使用回退匹配逻辑
+        if not row_found and api_model:
+            for row in range(self.api_table.rowCount()):
+                api_type_text = self.api_table.item(row, 0).text()
+                model_item = self.api_table.item(row, 1)
+                if not model_item:
+                    continue
+                
+                # 从UserRole数据中获取原始模型名称
+                model_name = model_item.data(Qt.UserRole) or model_item.text()
+                
+                # 从显示文本中提取原始模型名称（如果没有存储在UserRole中）
+                if not model_name and "(" in model_item.text():
+                    model_name = model_item.text().split(" (")[0]
+                
+                # 检查API类型和模型是否匹配
+                type_matches = (api_type == "gemini" and api_type_text == "Gemini") or \
+                              (api_type == "openai" and api_type_text == "OpenAI")
+                
+                model_matches = model_name == api_model
+                
+                # 如果有域名信息，则使用域名进一步确认匹配
+                domain_matches = True
+                if url_domain and "(" in model_item.text():
+                    display_domain = model_item.text().split("(")[1].rstrip(")")
+                    # 检查域名的第一部分是否匹配
+                    domain_first_part = url_domain.split('.')[0] if '.' in url_domain else url_domain
+                    if display_domain != "官方API" and display_domain != domain_first_part:
+                        domain_matches = False
+                
+                if type_matches and model_matches and domain_matches:
+                    # 更新状态
+                    status_item = self.api_table.item(row, 2)
+                    if status_item:
+                        if success:
+                            status_item.setText("测试通过")
+                            status_item.setBackground(QColor(0, 255, 0, 100))  # 半透明绿色
+                        else:
+                            status_text = "测试失败"
+                            if error_message:
+                                status_text += f": {error_message}"
+                            status_item.setText(status_text)
+                            status_item.setBackground(QColor(255, 0, 0, 100))  # 半透明红色
+                    
+                    # 重新启用测试按钮
+                    if self.api_table.cellWidget(row, 3):
+                        self.api_table.cellWidget(row, 3).setEnabled(True)
+                    
+                    # 找到匹配的行后就不再继续查找
+                    row_found = True
+                    break
+        
+        # 如果始终找不到行，记录错误信息
+        if not row_found:
+            print(f"警告: 无法找到匹配的表格行更新API测试状态: {api_id}, 类型:{api_type}, 模型:{api_model}")
+        
+        # 如果是在"测试全部"模式中，更新计数并继续测试
+        if self.testing_all:
+            self.completed_tests += 1
+            self._update_test_progress()
+            
+            # 如果还有待测试的API，启动下一个测试
+            if self.test_queue:
+                self._start_next_tests(1)
+            
+            # 检查是否所有测试都已完成
+            if self.completed_tests >= self.total_tests:
+                # 验证所有行状态是否正确更新
+                self._verify_all_tests_complete()
+                
+                # 重置测试状态
+                self.testing_all = False
+                self.test_all_button.setEnabled(True)
+                self.test_all_button.setText("测试全部API")
+                self.progress_label.setText(f"测试完成: {self.completed_tests}/{self.total_tests}")
+    
+    def _verify_all_tests_complete(self):
+        """验证是否所有测试行都已正确更新状态"""
+        pending_rows = []
+        
+        # 查找所有显示为"等待测试..."的行
+        for row in range(self.api_table.rowCount()):
+            status_item = self.api_table.item(row, 2)
+            if status_item and status_item.text() == "等待测试...":
+                pending_rows.append(row)
+        
+        if pending_rows:
+            print(f"发现 {len(pending_rows)} 行显示为'等待测试...'但测试队列已空")
+            
+            # 将这些行标记为"测试状态未知"
+            for row in pending_rows:
+                status_item = self.api_table.item(row, 2)
+                if status_item:
+                    status_item.setText("测试状态未知，请重试")
+                    status_item.setBackground(QColor(255, 165, 0, 100))  # 半透明橙色
                 
                 # 重新启用测试按钮
                 if self.api_table.cellWidget(row, 3):
-                    self.api_table.cellWidget(row, 3).setEnabled(True)
-                
-                # 找到匹配的行后就不再继续查找
-                break 
+                    self.api_table.cellWidget(row, 3).setEnabled(True) 
