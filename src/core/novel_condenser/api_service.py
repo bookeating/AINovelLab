@@ -54,7 +54,7 @@ def condense_novel_gemini(content: str, api_key_config: Optional[Dict] = None, k
         return ""
     
     # 获取API密钥配置
-    if api_key_config is None:
+    if api_key_config is None or not isinstance(api_key_config, dict):
         # 优先使用传入的key_manager
         if key_manager is None:
             # 尝试使用全局key_manager
@@ -85,11 +85,16 @@ def condense_novel_gemini(content: str, api_key_config: Optional[Dict] = None, k
                 
                 # 只有在没有其他选择时才创建新的APIKeyManager
                 if key_manager is None:
+                    # 检查是否有API配置可用
+                    if len(config.GEMINI_API_CONFIG) == 0:
+                        logger.error("未找到有效的Gemini API密钥配置")
+                        return None
+                    
                     logger.warning("未找到现有的API密钥管理器，创建临时管理器")
                     key_manager = APIKeyManager(config.GEMINI_API_CONFIG, config.DEFAULT_MAX_RPM)
         
         # 从key_manager获取API密钥配置
-        api_key_config = key_manager.get_key_config()
+        api_key_config = key_manager.get_key_config() if key_manager else None
         
         if api_key_config is None:
             # 检查是否因为所有密钥都被跳过而无法获取密钥
@@ -103,9 +108,15 @@ def condense_novel_gemini(content: str, api_key_config: Optional[Dict] = None, k
             logger.error("无法获取可用的API密钥，请检查配置或等待密钥冷却期结束")
             return None
     
-    api_key = api_key_config.get('key')
-    redirect_url = api_key_config.get('redirect_url')
+    # 从api_key_config中获取密钥信息，确保存在默认值
+    api_key = api_key_config.get('key', '')
+    redirect_url = api_key_config.get('redirect_url', '')
     model = api_key_config.get('model', config.DEFAULT_GEMINI_MODEL)
+    
+    # 检查API密钥是否有效
+    if not api_key:
+        logger.error("API密钥为空")
+        return None
     
     # 计算内容长度，超长的内容需要分段处理
     content_length = len(content)
@@ -229,7 +240,7 @@ def _process_content_with_gemini(content: str, api_key: str, redirect_url: str, 
     # 处理API密钥参数
     if "key=" not in final_api_url:
         # 如果URL中没有key参数，根据不同情况处理
-        if "aliyahzombie" in redirect_url:
+        if redirect_url and "aliyahzombie" in redirect_url:
             # 使用自定义标头
             headers["x-goog-api-key"] = api_key
         elif redirect_url and "generativelanguage.googleapis.com" not in redirect_url:
@@ -451,18 +462,20 @@ def condense_novel_openai(content: str, api_key_config: Optional[Dict] = None, k
     Returns:
         Optional[str]: 压缩后的内容，处理失败则返回None
     """
+    global openai_key_manager
+    
     # 如果内容为空，直接返回空字符串
     if not content or len(content.strip()) == 0:
         logger.warning("输入内容为空，无法处理")
         return ""
     
     # 获取API密钥配置
-    if api_key_config is None:
+    if api_key_config is None or not isinstance(api_key_config, dict):
         # 优先使用传入的key_manager
         if key_manager is None:
             # 尝试使用全局key_manager
-            if global_openai_key_manager is not None:
-                key_manager = global_openai_key_manager
+            if openai_key_manager is not None:
+                key_manager = openai_key_manager
                 logger.debug("使用全局OpenAI API密钥管理器")
             else:
                 # 尝试动态导入main模块中的key_manager（避免循环导入问题）
@@ -488,11 +501,16 @@ def condense_novel_openai(content: str, api_key_config: Optional[Dict] = None, k
                 
                 # 只有在没有其他选择时才创建新的APIKeyManager
                 if key_manager is None:
+                    # 检查是否有API配置可用
+                    if len(config.OPENAI_API_CONFIG) == 0:
+                        logger.error("未找到有效的OpenAI API密钥配置")
+                        return None
+                    
                     logger.warning("未找到现有的OpenAI API密钥管理器，创建临时管理器")
                     key_manager = APIKeyManager(config.OPENAI_API_CONFIG, config.DEFAULT_MAX_RPM)
         
         # 从key_manager获取API密钥配置
-        api_key_config = key_manager.get_key_config()
+        api_key_config = key_manager.get_key_config() if key_manager else None
         
         if api_key_config is None:
             # 检查是否因为所有密钥都被跳过而无法获取密钥
@@ -506,9 +524,15 @@ def condense_novel_openai(content: str, api_key_config: Optional[Dict] = None, k
             logger.error("无法获取可用的OpenAI API密钥，请检查配置或等待密钥冷却期结束")
             return None
     
-    api_key = api_key_config.get('key')
-    redirect_url = api_key_config.get('redirect_url')
+    # 从api_key_config中获取密钥信息，确保存在默认值
+    api_key = api_key_config.get('key', '')
+    redirect_url = api_key_config.get('redirect_url', '')
     model = api_key_config.get('model', config.DEFAULT_OPENAI_MODEL)
+    
+    # 检查API密钥是否有效
+    if not api_key:
+        logger.error("OpenAI API密钥为空")
+        return None
     
     # 计算内容长度，超长的内容需要分段处理
     content_length = len(content)
