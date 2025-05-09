@@ -86,6 +86,36 @@ MAX_CONDENSATION_RATIO = 50  # 最大压缩比例（百分比）
 TARGET_CONDENSATION_RATIO = 40  # 目标压缩比例（百分比）
 
 # =========================================================
+# LLM通用请求参数配置
+# =========================================================
+
+# 通用生成参数
+LLM_GENERATION_PARAMS = {
+    # 通用参数
+    "temperature": 0.2,        # 生成温度，较低的值会产生更确定性的输出
+    "top_p": 0.8,              # 核采样阈值，控制多样性
+    "top_k": 40,               # 仅用于Gemini，选择最有可能的K个词
+    "max_tokens": 8192,        # 最大输出标记数
+    
+    # 超时和重试设置
+    "timeout": {
+        "official_api": 120,   # 官方API的超时时间（秒）
+        "third_party_api": 180 # 第三方API的超时时间（秒）
+    },
+    "max_retries": 3,          # 最大重试次数
+    "retry_delay": 5,          # 基础重试延迟（秒）
+}
+
+# 提示词模板
+PROMPT_TEMPLATES = {
+    # 小说压缩提示词模板
+    "novel_condenser": "你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{min_ratio}%-{max_ratio}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。",
+    
+    # 分块处理前缀
+    "chunk_prefix": "这是一个小说的第{chunk_index}段，共{total_chunks}段。"
+}
+
+# =========================================================
 # 配置加载函数
 # =========================================================
 
@@ -100,6 +130,7 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
     """
     global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
+    global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
     # 首先尝试从项目全局配置加载
     if project_config:
@@ -122,6 +153,14 @@ def load_api_config(config_path: Optional[str] = None) -> bool:
             MAX_CONDENSATION_RATIO = project_config.MAX_CONDENSATION_RATIO
         if hasattr(project_config, 'TARGET_CONDENSATION_RATIO'):
             TARGET_CONDENSATION_RATIO = project_config.TARGET_CONDENSATION_RATIO
+        
+        # 加载LLM生成参数（如果存在）
+        if hasattr(project_config, 'LLM_GENERATION_PARAMS'):
+            LLM_GENERATION_PARAMS.update(project_config.LLM_GENERATION_PARAMS)
+            
+        # 加载提示词模板（如果存在）
+        if hasattr(project_config, 'PROMPT_TEMPLATES'):
+            PROMPT_TEMPLATES.update(project_config.PROMPT_TEMPLATES)
             
         # 如果至少加载了一种API配置，则返回成功
         if len(GEMINI_API_CONFIG) > 0 or len(OPENAI_API_CONFIG) > 0:
@@ -152,6 +191,7 @@ def _load_from_file(file_path: str) -> bool:
     """
     global GEMINI_API_CONFIG, OPENAI_API_CONFIG, DEFAULT_MAX_RPM
     global MIN_CONDENSATION_RATIO, MAX_CONDENSATION_RATIO, TARGET_CONDENSATION_RATIO
+    global LLM_GENERATION_PARAMS, PROMPT_TEMPLATES
     
     if not os.path.exists(file_path):
         logger.warning(f"配置文件不存在: {file_path}")
@@ -187,6 +227,24 @@ def _load_from_file(file_path: str) -> bool:
         if 'target_condensation_ratio' in config_data and isinstance(config_data['target_condensation_ratio'], int):
             TARGET_CONDENSATION_RATIO = config_data['target_condensation_ratio']
             logger.info(f"加载了目标脱水比例: {TARGET_CONDENSATION_RATIO}%")
+        
+        # 加载LLM生成参数（如果存在）
+        if 'llm_generation_params' in config_data and isinstance(config_data['llm_generation_params'], dict):
+            # 只更新配置中存在的参数，保留默认值
+            for key, value in config_data['llm_generation_params'].items():
+                if key in LLM_GENERATION_PARAMS:
+                    if isinstance(LLM_GENERATION_PARAMS[key], dict) and isinstance(value, dict):
+                        # 如果是嵌套字典，进行递归更新
+                        LLM_GENERATION_PARAMS[key].update(value)
+                    else:
+                        # 直接更新普通值
+                        LLM_GENERATION_PARAMS[key] = value
+            logger.info("加载了LLM生成参数配置")
+        
+        # 加载提示词模板（如果存在）
+        if 'prompt_templates' in config_data and isinstance(config_data['prompt_templates'], dict):
+            PROMPT_TEMPLATES.update(config_data['prompt_templates'])
+            logger.info("加载了提示词模板配置")
                 
         logger.info(f"成功加载配置文件: {file_path}")
         
@@ -244,7 +302,23 @@ def create_config_template(config_path: Optional[str] = None) -> None:
                 "max_rpm": 20,
                 "min_condensation_ratio": 30,
                 "max_condensation_ratio": 50,
-                "target_condensation_ratio": 40
+                "target_condensation_ratio": 40,
+                "llm_generation_params": {
+                    "temperature": 0.2,
+                    "top_p": 0.8,
+                    "top_k": 40,
+                    "max_tokens": 8192,
+                    "timeout": {
+                        "official_api": 120,
+                        "third_party_api": 180
+                    },
+                    "max_retries": 3,
+                    "retry_delay": 5
+                },
+                "prompt_templates": {
+                    "novel_condenser": "你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{min_ratio}%-{max_ratio}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。",
+                    "chunk_prefix": "这是一个小说的第{chunk_index}段，共{total_chunks}段。"
+                }
             }
             
             # 确保目录存在
