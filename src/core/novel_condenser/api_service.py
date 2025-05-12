@@ -8,6 +8,7 @@ import json
 import requests
 import time
 import traceback
+import re
 from typing import Dict, Optional, List, Any, Union, Tuple, Callable
 
 # 导入配置和工具
@@ -23,14 +24,19 @@ except ImportError:
 # 设置日志记录器
 logger = setup_logger(__name__)
 
-# 尝试导入全局key_manager
-try:
-    from . import main
-    global_key_manager = main.gemini_key_manager
-    global_openai_key_manager = main.openai_key_manager
-except (ImportError, AttributeError):
-    global_key_manager = None
-    global_openai_key_manager = None
+# =========================================================
+# 常量定义
+# =========================================================
+
+# API输入长度限制
+MAX_API_INPUT_LENGTH = 32000  # 单个API请求的最大输入字符数
+MAX_CHUNK_LENGTH = 20000      # 分块处理时的单个块最大字符数
+
+# 全局密钥管理器实例
+global_key_manager = None
+global_openai_key_manager = None
+
+# =========================================================
 
 def _get_api_key_config(api_type: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None) -> Optional[Dict]:
     """获取API密钥配置的通用函数
@@ -301,8 +307,10 @@ def _build_request_data(api_type: str, model: str, system_prompt: str, content: 
         }
 
 def _process_content_in_chunks(content: str, api_type: str, api_key: str, redirect_url: str, model: str, 
-                              key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
-    """通用的内容分块处理函数
+                              key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None) -> Optional[str]:
+    """将内容分块处理以避免超过API限制
+    
+    如果内容过长，会自动分块处理，然后将结果合并
     
     Args:
         content: 要处理的内容
@@ -310,48 +318,88 @@ def _process_content_in_chunks(content: str, api_type: str, api_key: str, redire
         api_key: API密钥
         redirect_url: API端点URL
         model: 模型名称
-        key_manager: 可选的API密钥管理器
+        key_manager: API密钥管理器实例
+        custom_prompt_template: 自定义提示词模板，如果提供则优先使用
     
     Returns:
         Optional[str]: 处理后的内容，处理失败则返回None
     """
-    # 计算内容长度，超长的内容需要分段处理
-    content_length = len(content)
-    max_chunk_length = 20000  # 单次处理的最大字符数
+    # 内容长度检查 - API通常有最大输入字符限制
+    content_len = len(content)
     
-    # 如果内容长度小于阈值，则直接处理
-    if content_length <= max_chunk_length:
-        return _process_content_with_api(content, api_type, api_key, redirect_url, model)
+    # 如果内容在API处理范围内，直接处理
+    if content_len <= MAX_API_INPUT_LENGTH:
+        return _process_content_with_api(content, api_type, api_key, redirect_url, model, 
+                                      False, 0, 0, custom_prompt_template)
     
-    # 分段处理
-    logger.debug(f"内容长度为 {content_length} 字符，将分段处理...")
+    # 内容太长，需要分块处理
+    logger.info(f"内容长度({content_len}字)超过API限制，将分块处理")
     
-    # 分段计算
-    total_chunks = (content_length + max_chunk_length - 1) // max_chunk_length
-    logger.debug(f"将分为 {total_chunks} 段进行处理")
+    # 分块处理
+    chunks = []
+    current_chunk = ""
+    current_chunk_length = 0
+    sentences = re.split(r'([。！？\.!?])', content)
     
-    # 存储各段的处理结果
+    # 处理切分后的句子并重组
+    for i in range(0, len(sentences), 2):
+        sentence = sentences[i]
+        # 如果有标点，加上标点
+        if i + 1 < len(sentences):
+            sentence += sentences[i + 1]
+            
+        sentence_length = len(sentence)
+        
+        # 如果当前块加上这个句子超过了最大长度限制，或者这是一个超长句子
+        if current_chunk_length + sentence_length > MAX_CHUNK_LENGTH or sentence_length > MAX_CHUNK_LENGTH:
+            # 如果当前块不为空，添加到块列表
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+                current_chunk_length = 0
+                
+            # 处理超长句子
+            if sentence_length > MAX_CHUNK_LENGTH:
+                # 直接按字符切分超长句子
+                sub_chunks = [sentence[i:i+MAX_CHUNK_LENGTH] for i in range(0, len(sentence), MAX_CHUNK_LENGTH)]
+                chunks.extend(sub_chunks)
+            else:
+                # 开始新的块
+                current_chunk = sentence
+                current_chunk_length = sentence_length
+        else:
+            # 添加句子到当前块
+            current_chunk += sentence
+            current_chunk_length += sentence_length
+    
+    # 添加最后一个块（如果有）
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    # 处理每个块
+    total_chunks = len(chunks)
+    logger.info(f"内容已分为 {total_chunks} 个块进行处理")
+    
     condensed_chunks = []
-    
-    # 分段处理
-    for i in range(total_chunks):
-        start_pos = i * max_chunk_length
-        end_pos = min(start_pos + max_chunk_length, content_length)
-        chunk = content[start_pos:end_pos]
+    for i, chunk in enumerate(chunks):
+        logger.info(f"处理第 {i+1}/{total_chunks} 个块 ({len(chunk)}字)...")
         
-        logger.debug(f"处理第 {i+1}/{total_chunks} 段，字符范围: {start_pos}-{end_pos}...")
-        
-        # 处理当前段
+        # 处理单个块，并传递自定义提示词模板
         condensed_chunk = _process_chunk_with_retry(
             chunk, api_type, api_key, redirect_url, model, 
-            i+1, total_chunks, key_manager
+            i+1, total_chunks, key_manager, custom_prompt_template
         )
         
-        if condensed_chunk is None:
-            logger.error(f"第 {i+1} 段处理失败，已尝试所有可用的API密钥")
-            return None
-        
-        condensed_chunks.append(condensed_chunk)
+        if condensed_chunk:
+            condensed_chunks.append(condensed_chunk)
+        else:
+            # 处理失败，跳过这个块并记录警告
+            logger.warning(f"第 {i+1}/{total_chunks} 个块处理失败，将被跳过")
+    
+    # 检查是否有成功处理的块
+    if not condensed_chunks:
+        logger.error("所有块处理均失败")
+        return None
     
     # 合并处理结果
     condensed_content = "\n\n".join(condensed_chunks)
@@ -364,8 +412,8 @@ def _process_content_in_chunks(content: str, api_type: str, api_key: str, redire
 
 def _process_chunk_with_retry(chunk: str, api_type: str, api_key: str, redirect_url: str, model: str,
                              chunk_index: int, total_chunks: int, 
-                             key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
-    """带重试机制处理内容块
+                             key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None) -> Optional[str]:
+    """处理单个块，带有重试逻辑
     
     Args:
         chunk: 要处理的内容块
@@ -373,45 +421,63 @@ def _process_chunk_with_retry(chunk: str, api_type: str, api_key: str, redirect_
         api_key: API密钥
         redirect_url: API端点URL
         model: 模型名称
-        chunk_index: 分块索引
-        total_chunks: 总分块数
-        key_manager: 可选的API密钥管理器
+        chunk_index: 块索引
+        total_chunks: 块总数
+        key_manager: API密钥管理器实例
+        custom_prompt_template: 自定义提示词模板，如果提供则优先使用
     
     Returns:
         Optional[str]: 处理后的内容，处理失败则返回None
     """
-    # 先尝试处理当前段
-    condensed_chunk = _process_content_with_api(
-        chunk, api_type, api_key, redirect_url, model, 
-        is_chunk=True, chunk_index=chunk_index, total_chunks=total_chunks
-    )
+    max_retries = config.LLM_GENERATION_PARAMS.get("max_retries", 3)
+    retry_delay = config.LLM_GENERATION_PARAMS.get("retry_delay", 5)
     
-    # 如果处理失败且有key_manager，尝试获取新的API密钥重试
-    if condensed_chunk is None and key_manager:
-        logger.warning(f"第 {chunk_index} 段处理失败，尝试获取新的API密钥...")
-        
-        # 报告当前密钥错误
-        key_manager.report_error(api_key)
-        
-        # 获取新的API密钥
-        api_key_config = key_manager.get_key_config()
-        if api_key_config:
-            new_api_key = api_key_config.get('key')
-            new_redirect_url = api_key_config.get('redirect_url', '')
-            default_model = config.DEFAULT_GEMINI_MODEL if api_type == "gemini" else config.DEFAULT_OPENAI_MODEL
-            new_model = api_key_config.get('model', default_model)
-            
-            # 使用新的API密钥重试
-            logger.debug(f"使用新的API密钥重试第 {chunk_index} 段...")
-            return _process_content_with_api(
-                chunk, api_type, new_api_key, new_redirect_url, new_model, 
-                is_chunk=True, chunk_index=chunk_index, total_chunks=total_chunks
+    for retry in range(max_retries):
+        try:
+            # 处理单个块，并传递自定义提示词模板
+            condensed_chunk = _process_content_with_api(
+                chunk, api_type, api_key, redirect_url, model, 
+                True, chunk_index, total_chunks, custom_prompt_template
             )
+            
+            if condensed_chunk:
+                # 处理成功，报告成功并返回结果
+                if key_manager:
+                    key_manager.report_success(api_key)
+                return condensed_chunk
+            else:
+                # 处理失败，报告错误
+                logger.warning(f"块 {chunk_index}/{total_chunks} 处理失败 (尝试 {retry+1}/{max_retries})")
+                if key_manager:
+                    key_manager.report_error(api_key)
+                
+                # 只要不是最后一次重试，就等待一段时间后重试
+                if retry < max_retries - 1:
+                    delay_seconds = _calculate_exponential_backoff(retry_delay, retry)
+                    logger.debug(f"将在 {delay_seconds} 秒后重试...")
+                    time.sleep(delay_seconds)
+        except Exception as e:
+            # 捕获处理过程中的任何异常
+            logger.error(f"处理块 {chunk_index}/{total_chunks} 时发生错误: {e}")
+            logger.debug(traceback.format_exc())
+            
+            # 报告错误
+            if key_manager:
+                key_manager.report_error(api_key)
+                
+            # 只要不是最后一次重试，就等待一段时间后重试
+            if retry < max_retries - 1:
+                delay_seconds = _calculate_exponential_backoff(retry_delay, retry)
+                logger.debug(f"将在 {delay_seconds} 秒后重试...")
+                time.sleep(delay_seconds)
     
-    return condensed_chunk
+    # 所有重试都失败
+    logger.error(f"块 {chunk_index}/{total_chunks} 处理失败，已达到最大重试次数")
+    return None
 
 def _process_content_with_api(content: str, api_type: str, api_key: str, redirect_url: str, model: str, 
-                             is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0) -> Optional[str]:
+                             is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0,
+                             custom_prompt_template: Optional[str] = None) -> Optional[str]:
     """通用的API内容处理函数
     
     Args:
@@ -423,12 +489,15 @@ def _process_content_with_api(content: str, api_type: str, api_key: str, redirec
         is_chunk: 是否为分块处理的一部分
         chunk_index: 分块索引
         total_chunks: 总分块数
+        custom_prompt_template: 自定义提示词模板，如果提供则优先使用
     
     Returns:
         Optional[str]: 处理后的内容，处理失败则返回None
     """
-    # 构建提示词
-    system_prompt = generate_novel_condenser_prompt(is_chunk, chunk_index, total_chunks)
+    # 构建提示词，并传递自定义提示词模板
+    system_prompt = generate_novel_condenser_prompt(
+        is_chunk, chunk_index, total_chunks, len(content), custom_prompt_template
+    )
     
     # 构建API URL
     final_api_url = _build_api_url(api_type, api_key, redirect_url, model)
@@ -588,26 +657,46 @@ def _calculate_exponential_backoff(base_delay: int, retry_count: int) -> int:
     """
     return base_delay * (2 ** retry_count)
 
-def generate_novel_condenser_prompt(is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0) -> str:
+def generate_novel_condenser_prompt(is_chunk: bool = False, chunk_index: int = 0, total_chunks: int = 0, content_length: int = 0, custom_prompt_template: Optional[str] = None) -> str:
     """生成小说内容压缩的提示词
     
     Args:
         is_chunk: 是否为分块处理的一部分
         chunk_index: 分块索引
         total_chunks: 总分块数
+        content_length: 原文内容长度（字数）
+        custom_prompt_template: 自定义提示词模板，如果提供则使用此模板
     
     Returns:
         str: 生成的提示词
     """
     # 获取基础提示词模板
-    prompt_template = config.PROMPT_TEMPLATES.get("novel_condenser", 
-                      "你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{min_ratio}%-{max_ratio}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。")
+    if custom_prompt_template:
+        # 优先使用传入的自定义模板
+        prompt_template = custom_prompt_template
+    else:
+        # 否则从配置中获取
+        prompt_template = config.PROMPT_TEMPLATES.get("novel_condenser", 
+                         "你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{min_ratio}%-{max_ratio}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。")
     
-    # 替换变量
-    prompt = prompt_template.format(
-        min_ratio=config.MIN_CONDENSATION_RATIO,
-        max_ratio=config.MAX_CONDENSATION_RATIO
-    )
+    # 基于原文字数计算目标字数范围
+    if content_length > 0:
+        # 计算目标字数范围
+        min_count = int(content_length * config.MIN_CONDENSATION_RATIO / 100)
+        max_count = int(content_length * config.MAX_CONDENSATION_RATIO / 100)
+        
+        # 使用字数参数替换百分比参数
+        prompt = prompt_template.format(
+            original_count=content_length,
+            min_count=min_count,
+            max_count=max_count
+        )
+    else:
+        # 如果没有提供原文长度，仍使用百分比
+        prompt = prompt_template.format(
+            min_ratio=config.MIN_CONDENSATION_RATIO,
+            max_ratio=config.MAX_CONDENSATION_RATIO
+        )
     
     # 如果是分块处理，添加分块前缀
     if is_chunk:
@@ -625,34 +714,36 @@ def generate_novel_condenser_prompt(is_chunk: bool = False, chunk_index: int = 0
     
     return prompt
 
-def condense_novel_gemini(content: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
+def condense_novel_gemini(content: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None) -> Optional[str]:
     """使用Gemini API对小说内容进行压缩处理
     
     Args:
         content: 小说内容
         api_key_config: API密钥配置
         key_manager: API密钥管理器实例
+        custom_prompt_template: 自定义提示词模板，如果提供则优先使用
 
     Returns:
         Optional[str]: 压缩后的内容，处理失败则返回None
     """
-    return _condense_novel_with_api("gemini", content, api_key_config, key_manager)
+    return _condense_novel_with_api("gemini", content, api_key_config, key_manager, custom_prompt_template)
 
-def condense_novel_openai(content: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
+def condense_novel_openai(content: str, api_key_config: Optional[Dict] = None, key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None) -> Optional[str]:
     """使用OpenAI API对小说内容进行压缩处理
     
     Args:
         content: 小说内容
         api_key_config: API密钥配置
         key_manager: API密钥管理器实例
+        custom_prompt_template: 自定义提示词模板，如果提供则优先使用
 
     Returns:
         Optional[str]: 压缩后的内容，处理失败则返回None
     """
-    return _condense_novel_with_api("openai", content, api_key_config, key_manager)
+    return _condense_novel_with_api("openai", content, api_key_config, key_manager, custom_prompt_template)
 
 def _condense_novel_with_api(api_type: str, content: str, api_key_config: Optional[Dict] = None, 
-                            key_manager: Optional[APIKeyManager] = None) -> Optional[str]:
+                            key_manager: Optional[APIKeyManager] = None, custom_prompt_template: Optional[str] = None) -> Optional[str]:
     """通用API小说内容压缩处理函数
     
     Args:
@@ -660,6 +751,7 @@ def _condense_novel_with_api(api_type: str, content: str, api_key_config: Option
         content: 小说内容
         api_key_config: API密钥配置
         key_manager: API密钥管理器实例
+        custom_prompt_template: 自定义提示词模板，如果提供则优先使用
     
     Returns:
         Optional[str]: 压缩后的内容，处理失败则返回None
@@ -685,8 +777,8 @@ def _condense_novel_with_api(api_type: str, content: str, api_key_config: Option
         logger.error(f"{api_type.capitalize()} API密钥为空")
         return None
     
-    # 使用通用分块处理函数
-    return _process_content_in_chunks(content, api_type, api_key, redirect_url, model, key_manager)
+    # 使用通用分块处理函数，传递自定义提示词模板
+    return _process_content_in_chunks(content, api_type, api_key, redirect_url, model, key_manager, custom_prompt_template)
 
 def _parse_llm_response(response_json: Dict, api_type: str = "gemini") -> Optional[str]:
     """解析LLM API响应，支持多种格式

@@ -65,6 +65,29 @@ def get_possible_config_paths():
     # 去重
     return list(dict.fromkeys(possible_paths))
 
+def get_config_file_path() -> str:
+    """获取当前使用的配置文件路径
+    
+    尝试按优先级查找配置文件，包括:
+    1. 项目模块中的CONFIG_FILE_PATH
+    2. 可能的配置路径列表中的已存在文件
+    
+    Returns:
+        str: 配置文件路径，如果没有找到，返回默认位置
+    """
+    # 尝试从项目模块中获取配置路径
+    if project_config and hasattr(project_config, 'CONFIG_FILE_PATH'):
+        if os.path.exists(project_config.CONFIG_FILE_PATH):
+            return project_config.CONFIG_FILE_PATH
+    
+    # 否则按优先级查找
+    for path in get_possible_config_paths():
+        if os.path.exists(path):
+            return path
+    
+    # 如果没有找到，返回默认位置
+    return get_possible_config_paths()[0]
+
 # 配置文件默认路径
 CONFIG_FILE_PATH = get_possible_config_paths()[0]  # 默认使用第一个路径
 
@@ -109,7 +132,7 @@ LLM_GENERATION_PARAMS = {
 # 提示词模板
 PROMPT_TEMPLATES = {
     # 小说压缩提示词模板
-    "novel_condenser": "你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{min_ratio}%-{max_ratio}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。",
+    "novel_condenser": '你是一位专业的小说内容整理与改写专家。你的任务是将下面的小说内容（原文 {original_count}字）调整为一个更简洁的版本。调整后版本的字数应在 {min_count} 字到 {max_count} 字之间，请务必严格控制产出字数在该范围内。\n\n请严格遵循以下要求：\n\n主线完整：完整保留故事的主线情节与所有关键转折点。不允许遗漏任何重要剧情推进环节。\n人物塑造：保留主要人物性格、形象发展至关重要的对话、内心活动和互动细节。\n环境氛围：保留对理解世界观、故事背景、气氛营造有核心作用的环境描写与关键细节（但避免无关冗余描写）。\n重要配角与线索：不遗漏任何对情节发展有显著影响的次要人物和叙事线索。\n风格连贯流畅：确保压缩后的文本连贯、流畅，逻辑清楚，尽量保持原作风格和叙事调性。\n动态回补机制：初步整理完成后，请统计自己整理后文本的字数。如果字数低于目标下限 {min_count}，请回溯补充之前可能略去的次要情节、气氛描写、对主配角的心理刻画、对话或有助主旨细节，直至内容字数达到要求。\n禁止输出范围外字数：不允许输出低于 {min_count}或高于 {max_count} 字的文本。\n\n输出格式与注意事项：\n直接输出脱水压缩后的文本本身，不要添加任何前言、说明、评论、总结、序号或标题。\n如果整理后确实已到目标范围上限，但仍有部分细节未能保留，在不影响主线流畅的前提下可以适当取舍，但必须优先保障上述 1-5 点。',
     
     # 分块处理前缀
     "chunk_prefix": "这是一个小说的第{chunk_index}段，共{total_chunks}段。"
@@ -245,6 +268,11 @@ def _load_from_file(file_path: str) -> bool:
         if 'prompt_templates' in config_data and isinstance(config_data['prompt_templates'], dict):
             PROMPT_TEMPLATES.update(config_data['prompt_templates'])
             logger.info("加载了提示词模板配置")
+        
+        # 加载自定义提示词（如果存在）- 优先级高于prompt_templates中的设置
+        if 'customer_prompt' in config_data and isinstance(config_data['customer_prompt'], str):
+            PROMPT_TEMPLATES["novel_condenser"] = config_data['customer_prompt']
+            logger.info("加载了自定义提示词")
                 
         logger.info(f"成功加载配置文件: {file_path}")
         
@@ -276,60 +304,87 @@ def create_config_template(config_path: Optional[str] = None) -> None:
             exe_dir = os.path.dirname(sys.executable)
             config_path = os.path.join(exe_dir, CONFIG_FILE_NAME)
     
-    if not os.path.exists(config_path):
-        try:
-            template = {
-                "gemini_api": [
-                    {
-                        "key": "在此处填入您的Gemini API密钥1",
-                        "redirect_url": "https://generativelanguage.googleapis.com/v1beta/models",
-                        "model": "gemini-2.0-flash",
-                        "rpm": 10
-                    },
-                    {
-                        "key": "在此处填入您的Gemini API密钥2",
-                        "rpm": 5
-                    }
-                ],
-                "openai_api": [
-                    {
-                        "key": "在此处填入您的OpenAI API密钥",
-                        "redirect_url": "https://api.openai.com/v1/chat/completions",
-                        "model": "gpt-3.5-turbo",
-                        "rpm": 10
-                    }
-                ],
-                "max_rpm": 20,
-                "min_condensation_ratio": 30,
-                "max_condensation_ratio": 50,
-                "target_condensation_ratio": 40,
-                "llm_generation_params": {
-                    "temperature": 0.2,
-                    "top_p": 0.8,
-                    "top_k": 40,
-                    "max_tokens": 8192,
-                    "timeout": {
-                        "official_api": 120,
-                        "third_party_api": 180
-                    },
-                    "max_retries": 3,
-                    "retry_delay": 5
-                },
-                "prompt_templates": {
-                    "novel_condenser": "你是一个小说内容压缩工具。请将下面的小说内容精简到原来的{min_ratio}%-{max_ratio}%左右，同时保留所有重要情节、对话和描写，不要遗漏关键情节和人物。不要添加任何解释或总结，直接输出压缩后的内容。",
-                    "chunk_prefix": "这是一个小说的第{chunk_index}段，共{total_chunks}段。"
+    # 检查文件是否已存在，避免覆盖
+    if os.path.exists(config_path):
+        logger.warning(f"配置文件已存在，跳过创建: {config_path}")
+        return
+    
+    # 创建配置模板
+    try:
+        # 创建空的API密钥配置模板
+        template = {
+            "gemini_api": [
+                {
+                    "key": "你的gemini 密钥",
+                    "redirect_url": "代理url 地址，可空。默认：https://generativelanguage.googleapis.com/v1beta/models",
+                    "model": "模型，可空。默认：gemini-2.0-flash",
+                    "rpm": 10
+                },{
+                    "key":"最简配置demo"
                 }
+            ],
+            "openai_api": [
+                {
+                    "key": "你的openai 密钥或其他一切兼容openai-api 格式的,如DeepSeek等",
+                    "redirect_url": "代理url，可空。默认：https://api.openai.com/v1/chat/completions",
+                    "model": "模型，可空。默认：gpt-3.5-turbo",
+                    "rpm": 10
+                },{
+                    "key":"最简配置demo"
+                }
+            ],
+            "max_rpm": 20,
+            "min_condensation_ratio": MIN_CONDENSATION_RATIO,
+            "max_condensation_ratio": MAX_CONDENSATION_RATIO,
+            "target_condensation_ratio": TARGET_CONDENSATION_RATIO,
+            "llm_generation_params": LLM_GENERATION_PARAMS,
+            "prompt_templates": {
+                "novel_condenser": '你是一位专业的小说内容整理与改写专家。你的任务是将下面的小说内容（原文 {original_count}字）调整为一个更简洁的版本。调整后版本的字数应在 {min_count} 字到 {max_count} 字之间，请务必严格控制产出字数在该范围内。\n\n请严格遵循以下要求：\n\n主线完整：完整保留故事的主线情节与所有关键转折点。不允许遗漏任何重要剧情推进环节。\n人物塑造：保留主要人物性格、形象发展至关重要的对话、内心活动和互动细节。\n环境氛围：保留对理解世界观、故事背景、气氛营造有核心作用的环境描写与关键细节（但避免无关冗余描写）。\n重要配角与线索：不遗漏任何对情节发展有显著影响的次要人物和叙事线索。\n风格连贯流畅：确保压缩后的文本连贯、流畅，逻辑清楚，尽量保持原作风格和叙事调性。\n动态回补机制：初步整理完成后，请统计自己整理后文本的字数。如果字数低于目标下限 {min_count}，请回溯补充之前可能略去的次要情节、气氛描写、对主配角的心理刻画、对话或有助主旨细节，直至内容字数达到要求。\n禁止输出范围外字数：不允许输出低于 {min_count}或高于 {max_count} 字的文本。\n\n输出格式与注意事项：\n直接输出脱水压缩后的文本本身，不要添加任何前言、说明、评论、总结、序号或标题。\n如果整理后确实已到目标范围上限，但仍有部分细节未能保留，在不影响主线流畅的前提下可以适当取舍，但必须优先保障上述 1-5 点。',
+                "chunk_prefix": "这是一个小说的第{chunk_index}段，共{total_chunks}段。"
             }
+        }
+        
+        # 确保目录存在
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(template, f, ensure_ascii=False, indent=4)
             
-            # 确保目录存在
-            os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(template, f, ensure_ascii=False, indent=4)
-                
-            logger.info(f"已创建配置文件模板: {config_path}")
-            print(f"已创建配置文件模板: {config_path}")
-            print("请编辑此文件并填入您的API密钥")
-        except Exception as e:
-            logger.error(f"创建配置文件模板出错: {e}")
-            print(f"创建配置文件模板出错: {e}") 
+        logger.info(f"已创建配置文件模板: {config_path}")
+        print(f"已创建配置文件模板: {config_path}")
+        print("请编辑此文件并填入您的API密钥")
+    except Exception as e:
+        logger.error(f"创建配置文件模板出错: {e}")
+        print(f"创建配置文件模板出错: {e}")
+
+def save_config_to_file(custom_prompt: str) -> bool:
+    """将自定义提示词保存到配置文件
+    
+    Args:
+        custom_prompt: 自定义提示词
+    
+    Returns:
+        bool: 保存是否成功
+    """
+    config_path = get_config_file_path()
+    
+    try:
+        # 读取现有配置
+        config_data = {}
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = json.load(f)
+        
+        # 更新自定义提示词
+        config_data['customer_prompt'] = custom_prompt
+        
+        # 保存回文件
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+        
+        logger.info(f"已保存自定义提示词到配置文件: {config_path}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"保存配置文件失败: {e}")
+        return False 

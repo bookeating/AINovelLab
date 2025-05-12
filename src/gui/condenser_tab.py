@@ -8,7 +8,8 @@ import os
 import sys
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                            QFileDialog, QMessageBox, QProgressBar, QTextEdit, 
-                           QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox, QFrame)
+                           QSpinBox, QGroupBox, QLineEdit, QCheckBox, QComboBox, QFrame,
+                           QDialog, QDialogButtonBox, QSplitter, QTabWidget)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QTextCursor
 
@@ -27,6 +28,7 @@ except ImportError:
     import src.core.novel_condenser.main as main_module  # 直接导入整个main模块
 
 from .worker import WorkerThread
+from .prompt_edit_dialog import PromptEditDialog
 
 class CondenserTab(QWidget):
     """小说脱水标签页"""
@@ -175,10 +177,20 @@ class CondenserTab(QWidget):
         ratio_range_layout.addWidget(self.max_ratio_spin)
         ratio_range_layout.addStretch()
         
+        # 添加提示词调整按钮
+        prompt_adjust_layout = QHBoxLayout()
+        self.prompt_adjust_button = QPushButton("提示词调整")
+        self.prompt_adjust_button.setObjectName("prompt_adjust_button")
+        self.prompt_adjust_button.setToolTip("调整脱水提示词并进行单次测试")
+        self.prompt_adjust_button.clicked.connect(self.open_prompt_editor)
+        prompt_adjust_layout.addWidget(self.prompt_adjust_button)
+        prompt_adjust_layout.addStretch()
+        
         # 将所有选项添加到选项布局中
         options_layout.addLayout(range_layout)  # 章节范围
         options_layout.addWidget(self.force_regenerate_checkbox)  # 强制生成选项
         options_layout.addLayout(ratio_range_layout)  # 脱水比例区间
+        options_layout.addLayout(prompt_adjust_layout)  # 提示词调整按钮
         options_group.setLayout(options_layout)
         
         # 状态和进度
@@ -573,4 +585,14 @@ class CondenserTab(QWidget):
         self.target_ratio = (value + self.min_ratio_spin.value()) // 2
         # 更新配置
         config.MAX_CONDENSATION_RATIO = value
-        config.TARGET_CONDENSATION_RATIO = self.target_ratio 
+        config.TARGET_CONDENSATION_RATIO = self.target_ratio
+    
+    def open_prompt_editor(self):
+        """打开提示词编辑器对话框"""
+        # 创建提示词编辑器对话框，传入txt_files（可能为空）
+        dialog = PromptEditDialog(self.txt_files, self)
+        dialog.exec_()
+        
+        # 如果提示词被修改了，更新日志
+        if dialog.prompt_changed:
+            self.add_log(f"提示词已更新: {dialog.prompt_preview()}") 
